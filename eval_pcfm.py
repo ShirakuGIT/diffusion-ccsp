@@ -40,15 +40,94 @@ from fix_and_eval import clamp_to_tray, check_constraints, compute_barrier
 # Analytic Gauss-Newton projection (fast, no autograd)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def repulsive_prestep(poses_np, edge_index, edge_attr, geoms_np,
+                      constraint_types, free_mask, pose_dim=4,
+                      step_size=0.3):
+    """
+    Pre-step: push colocated objects apart for repulsive constraints
+    (away-from, cfree) where GN has no useful gradient.
+
+    When two objects are nearly or fully overlapping, the GN projection
+    can't resolve it because the barrier gradient is degenerate.
+    This step explicitly separates them along a random direction.
+    """
+    poses = poses_np.copy()
+    free_set = set(np.where(free_mask)[0])
+
+    for ei in range(edge_index.shape[0]):
+        i = int(edge_index[ei, 0])
+        j = int(edge_index[ei, 1])
+        ctype_idx = int(edge_attr[ei])
+        if ctype_idx >= len(constraint_types):
+            continue
+        ctype = constraint_types[ctype_idx]
+
+        if ctype not in ('away-from', 'cfree'):
+            continue
+
+        xi, yi = poses[i, 0], poses[i, 1]
+        xj, yj = poses[j, 0], poses[j, 1]
+        wi, hi_g = geoms_np[i, 0], geoms_np[i, 1]
+        wj, hj_g = geoms_np[j, 0], geoms_np[j, 1]
+
+        if ctype == 'away-from':
+            dist = np.sqrt((xi - xj)**2 + (yi - yj)**2) + 1e-8
+            threshold = max(wi + wj, hi_g + hj_g) * 2.0
+            h_val = dist - threshold
+        else:  # cfree
+            dx = abs(xi - xj) - (wi + wj)
+            dy = abs(yi - yj) - (hi_g + hj_g)
+            h_val = max(dx, dy)
+
+        if h_val >= -0.05:
+            continue  # not badly violated, GN can handle it
+
+        # Compute separation direction
+        dx_dir = xi - xj
+        dy_dir = yi - yj
+        dist = np.sqrt(dx_dir**2 + dy_dir**2) + 1e-8
+
+        if dist < 0.01:
+            # Nearly coincident — pick random direction
+            angle = np.random.uniform(0, 2 * np.pi)
+            dx_dir = np.cos(angle)
+            dy_dir = np.sin(angle)
+            dist = 1.0
+
+        # Normalize
+        dx_dir /= dist
+        dy_dir /= dist
+
+        # Push amount: proportional to violation magnitude
+        push = step_size * abs(h_val)
+
+        # Push both nodes apart (if free), or just the free one
+        if i in free_set and j in free_set:
+            poses[i, 0] += dx_dir * push * 0.5
+            poses[i, 1] += dy_dir * push * 0.5
+            poses[j, 0] -= dx_dir * push * 0.5
+            poses[j, 1] -= dy_dir * push * 0.5
+        elif i in free_set:
+            poses[i, 0] += dx_dir * push
+            poses[i, 1] += dy_dir * push
+        elif j in free_set:
+            poses[j, 0] -= dx_dir * push
+            poses[j, 1] -= dy_dir * push
+
+    return poses
+
+
 def gauss_newton_project(poses_np, edge_index, edge_attr, geoms_np,
                          constraint_types, free_mask,
-                         n_iters=3, damping=1e-4, pose_dim=4):
+                         n_iters=3, damping=1e-4, pose_dim=4,
+                         use_repulsive=True):
     """
     Project poses onto constraint manifold using Gauss-Newton with analytic Jacobians.
         x_proj = x - J^T (J J^T + λI)^{-1} h(x)
 
     Uses compute_barrier() from fix_and_eval.py for h and gradients.
     Only projects violated constraints (h < 0 in barrier convention → violated).
+    Optionally applies repulsive pre-step for degenerate constraints.
 
     Args:
         poses_np: [N, pose_dim] numpy array
@@ -60,6 +139,7 @@ def gauss_newton_project(poses_np, edge_index, edge_attr, geoms_np,
         n_iters: GN iterations
         damping: regularization
         pose_dim: dimension of pose (4 for qualitative)
+        use_repulsive: apply repulsive pre-step for away-from/cfree
 
     Returns:
         projected poses [N, pose_dim] numpy array
@@ -75,6 +155,11 @@ def gauss_newton_project(poses_np, edge_index, edge_attr, geoms_np,
     free_dim = n_free * pose_dim
 
     poses = poses_np.copy()
+
+    # Repulsive pre-step: push overlapping objects apart
+    if use_repulsive:
+        poses = repulsive_prestep(poses, edge_index, edge_attr, geoms_np,
+                                  constraint_types, free_mask, pose_dim)
 
     for iteration in range(n_iters):
         # Collect violated constraints
