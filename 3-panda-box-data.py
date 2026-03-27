@@ -22,7 +22,7 @@ import pybullet_planning as pp
 
 from test_worlds import test_robot_world
 from config import RENDER_PATH, DATASET_PATH
-from gym_utils import get_packing_replay_dirs
+# from gym_utils import get_packing_replay_dirs
 from data_utils import compute_qualitative_constraints
 from demo_utils import demo_runner, load_packing_object, get_rainbow_colors, get_initial_pose_alphas, \
     exist_cfree_ik, get_panda_ready, pack_given_solution_json, robot_data_config, g_z_gap, \
