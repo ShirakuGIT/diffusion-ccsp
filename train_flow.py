@@ -145,7 +145,7 @@ class FlowMatchingCCSP(nn.Module):
     """
 
     def __init__(self, dims, hidden_dim=256, constraint_types=None,
-                 normalize=True, device='cuda'):
+                 normalize=True, device='cuda', aggregator='sum'):
         super().__init__()
 
         if constraint_types is None:
@@ -157,6 +157,7 @@ class FlowMatchingCCSP(nn.Module):
         self.constraint_types = constraint_types
         self.input_mode       = _infer_input_mode(constraint_types)
         self.normalize        = normalize
+        self.aggregator       = aggregator  # 'sum', 'attention', 'maxpool'
 
         geom_dim = dims[0][0]
         pose_dim = dims[-1][0]
@@ -200,11 +201,19 @@ class FlowMatchingCCSP(nn.Module):
         ])
 
         # Pose decoder: hidden → hidden//2 → pose_dim
-        self.pose_decoder = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.SiLU(),
-            nn.Linear(hidden_dim // 2, pose_dim),
-        ).to(device)
+        # For attention: output pose_dim + 1 (extra logit for urgency weight)
+        if aggregator == 'attention':
+            self.pose_decoder = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim // 2),
+                nn.SiLU(),
+                nn.Linear(hidden_dim // 2, pose_dim + 1),
+            ).to(device)
+        else:
+            self.pose_decoder = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim // 2),
+                nn.SiLU(),
+                nn.Linear(hidden_dim // 2, pose_dim),
+            ).to(device)
 
     # ── Internal helpers ─────────────────────────────────────────────────
 
@@ -250,56 +259,171 @@ class FlowMatchingCCSP(nn.Module):
 
         geom_emb, pose_emb, edge_index = self._encode(x_t, batch)
 
-        # Accumulate velocity predictions across all constraint types
-        all_v     = torch.zeros(n_nodes, pose_dim, device=device)
-        all_count = torch.zeros(n_nodes, device=device)
+        if self.aggregator == 'sum':
+            return self._forward_sum(
+                geom_emb, pose_emb, edge_index, batch, t_tensor,
+                n_nodes, pose_dim, device)
+        elif self.aggregator == 'attention':
+            return self._forward_attention(
+                geom_emb, pose_emb, edge_index, batch, t_tensor,
+                n_nodes, pose_dim, device)
+        elif self.aggregator == 'maxpool':
+            return self._forward_maxpool(
+                geom_emb, pose_emb, edge_index, batch, t_tensor,
+                n_nodes, pose_dim, device)
+        else:
+            raise ValueError(f"Unknown aggregator: {self.aggregator}")
 
+    def _run_constraint_mlps(self, geom_emb, pose_emb, edge_index, batch,
+                              t_tensor, device):
+        """Run all constraint MLPs, return list of (src, dst, v_src, v_dst) tuples.
+        For attention aggregator, v_src/v_dst include the extra logit dim."""
+        import jactorch
+        results = []
         for i, mlp in enumerate(self.constraint_mlps):
-            # Edges of this constraint type
             edge_mask = (batch.edge_attr.to(device) == i)
             if edge_mask.sum() == 0:
                 continue
-            edges = edge_index[edge_mask]        # [E_i, 2]
-            src, dst = edges[:, 0], edges[:, 1]  # source / destination node indices
-
-            # Build per-edge input: [geom_s, geom_d, pose_s, pose_d, time]
-            # Each embedding: [E_i, hidden]
+            edges = edge_index[edge_mask]
+            src, dst = edges[:, 0], edges[:, 1]
             n_edges = src.shape[0]
-            t_emb   = self.time_mlp(
-                jactorch.add_dim(t_tensor, 0, n_edges)[:, 0]
-            )  # [E_i, hidden]
-
+            t_emb = self.time_mlp(
+                jactorch.add_dim(t_tensor, 0, n_edges)[:, 0])
             inputs = torch.cat([
-                geom_emb[src],   # [E_i, hidden]
-                geom_emb[dst],   # [E_i, hidden]
-                pose_emb[src],   # [E_i, hidden]
-                pose_emb[dst],   # [E_i, hidden]
-                t_emb,           # [E_i, hidden]
-            ], dim=-1)           # [E_i, 5*hidden]
+                geom_emb[src], geom_emb[dst],
+                pose_emb[src], pose_emb[dst], t_emb], dim=-1)
+            out = mlp(inputs)
+            v_src = self.pose_decoder(out[:, :self.hidden_dim])
+            v_dst = self.pose_decoder(out[:, self.hidden_dim:])
+            results.append((src, dst, v_src, v_dst))
+        return results
 
-            out = mlp(inputs)    # [E_i, 2*hidden]
+    def _forward_sum(self, geom_emb, pose_emb, edge_index, batch,
+                      t_tensor, n_nodes, pose_dim, device):
+        """Original scatter-add + sqrt-normalize aggregation."""
+        all_v = torch.zeros(n_nodes, pose_dim, device=device)
+        all_count = torch.zeros(n_nodes, device=device)
 
-            # Decode per-node velocity (one half per node in pair)
-            v_src = self.pose_decoder(out[:, :self.hidden_dim])   # [E_i, pose_dim]
-            v_dst = self.pose_decoder(out[:, self.hidden_dim:])   # [E_i, pose_dim]
-
-            # Scatter-add into accumulator
+        for src, dst, v_src, v_dst in self._run_constraint_mlps(
+                geom_emb, pose_emb, edge_index, batch, t_tensor, device):
+            n_edges = src.shape[0]
             all_v.scatter_add_(0, src.unsqueeze(-1).expand_as(v_src), v_src)
             all_v.scatter_add_(0, dst.unsqueeze(-1).expand_as(v_dst), v_dst)
             all_count.scatter_add_(0, src, torch.ones(n_edges, device=device))
             all_count.scatter_add_(0, dst, torch.ones(n_edges, device=device))
 
-        # Average (or sqrt-normalise as in ConstraintDiffuser)
         denom = all_count.unsqueeze(-1).clamp(min=1)
         if self.normalize:
             all_v = all_v / denom.sqrt()
         else:
             all_v = all_v / denom
 
-        # Keep masked (fixed) nodes at zero velocity
         mask = batch.mask.bool().to(device)
         all_v[mask] = 0.0
+        return all_v
 
+    def _forward_attention(self, geom_emb, pose_emb, edge_index, batch,
+                            t_tensor, n_nodes, pose_dim, device):
+        """Attention-weighted aggregation.
+        Each edge predicts velocity + urgency logit. Softmax over incoming
+        edges per node weights the velocities before summation."""
+        # Collect all edge contributions with their target node indices
+        all_node_indices = []  # which node each velocity targets
+        all_velocities = []    # [pose_dim] velocity vectors
+        all_logits = []        # scalar urgency logits
+
+        for src, dst, out_src, out_dst in self._run_constraint_mlps(
+                geom_emb, pose_emb, edge_index, batch, t_tensor, device):
+            # out_src/out_dst: [E_i, pose_dim + 1] (velocity + logit)
+            v_src, logit_src = out_src[:, :pose_dim], out_src[:, pose_dim]
+            v_dst, logit_dst = out_dst[:, :pose_dim], out_dst[:, pose_dim]
+
+            all_node_indices.append(src)
+            all_velocities.append(v_src)
+            all_logits.append(logit_src)
+
+            all_node_indices.append(dst)
+            all_velocities.append(v_dst)
+            all_logits.append(logit_dst)
+
+        if not all_node_indices:
+            mask = batch.mask.bool().to(device)
+            return torch.zeros(n_nodes, pose_dim, device=device)
+
+        node_idx = torch.cat(all_node_indices)      # [total_edges]
+        velocities = torch.cat(all_velocities)       # [total_edges, pose_dim]
+        logits = torch.cat(all_logits)               # [total_edges]
+
+        # Scatter-softmax: normalize logits per target node
+        # Manual implementation since torch_scatter not available
+        max_logit = torch.zeros(n_nodes, device=device).fill_(-1e9)
+        max_logit.scatter_reduce_(0, node_idx, logits, reduce='amax',
+                                   include_self=False)
+        exp_logits = torch.exp(logits - max_logit[node_idx])
+        sum_exp = torch.zeros(n_nodes, device=device)
+        sum_exp.scatter_add_(0, node_idx, exp_logits)
+        weights = exp_logits / sum_exp[node_idx].clamp(min=1e-8)
+
+        # Weight velocities and scatter-add
+        weighted_v = velocities * weights.unsqueeze(-1)
+        all_v = torch.zeros(n_nodes, pose_dim, device=device)
+        all_v.scatter_add_(0, node_idx.unsqueeze(-1).expand_as(weighted_v),
+                            weighted_v)
+
+        mask = batch.mask.bool().to(device)
+        all_v[mask] = 0.0
+        return all_v
+
+    def _forward_maxpool(self, geom_emb, pose_emb, edge_index, batch,
+                          t_tensor, n_nodes, pose_dim, device):
+        """Max-pooling (winner-take-all) aggregation.
+        For each node, takes the max absolute velocity across all incoming
+        constraint edges, preserving sign."""
+        # Collect all contributions
+        all_node_indices = []
+        all_velocities = []
+
+        for src, dst, v_src, v_dst in self._run_constraint_mlps(
+                geom_emb, pose_emb, edge_index, batch, t_tensor, device):
+            all_node_indices.append(src)
+            all_velocities.append(v_src)
+            all_node_indices.append(dst)
+            all_velocities.append(v_dst)
+
+        if not all_node_indices:
+            return torch.zeros(n_nodes, pose_dim, device=device)
+
+        node_idx = torch.cat(all_node_indices)      # [total_edges]
+        velocities = torch.cat(all_velocities)       # [total_edges, pose_dim]
+
+        # Max-pool by absolute value, preserving sign
+        # For each node and dimension: pick the velocity with largest |v|
+        abs_v = velocities.abs()
+
+        # Use scatter_reduce with amax on absolute values to find max magnitudes
+        max_abs = torch.zeros(n_nodes, pose_dim, device=device)
+        max_abs.scatter_reduce_(
+            0, node_idx.unsqueeze(-1).expand_as(abs_v),
+            abs_v, reduce='amax', include_self=True)
+
+        # Also need the signed version — use a trick:
+        # scatter positive and negative maxes separately, pick larger magnitude
+        all_v_pos = torch.zeros(n_nodes, pose_dim, device=device)
+        all_v_neg = torch.zeros(n_nodes, pose_dim, device=device)
+
+        all_v_pos.scatter_reduce_(
+            0, node_idx.unsqueeze(-1).expand_as(velocities),
+            velocities.clamp(min=0), reduce='amax', include_self=True)
+        all_v_neg.scatter_reduce_(
+            0, node_idx.unsqueeze(-1).expand_as(velocities),
+            velocities.clamp(max=0), reduce='amin', include_self=True)
+
+        # Pick whichever has larger absolute value per component
+        use_pos = all_v_pos.abs() >= all_v_neg.abs()
+        all_v = torch.where(use_pos, all_v_pos, all_v_neg)
+
+        mask = batch.mask.bool().to(device)
+        all_v[mask] = 0.0
         return all_v
 
     # ── Training loss ────────────────────────────────────────────────────
