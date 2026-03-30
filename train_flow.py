@@ -29,6 +29,7 @@ import time
 import math
 import argparse
 from pathlib import Path
+from collections import Counter
 
 import torch
 import torch.nn as nn
@@ -537,7 +538,8 @@ class FlowTrainer:
     def __init__(self, model, train_dataset, test_datasets,
                  lr=5e-4, batch_size=128, train_num_steps=200000,
                  save_every=10000, results_folder='./logs/flow',
-                 num_workers=0):
+                 num_workers=0, print_every=250, verbose=False,
+                 eval_n_samples=1, eval_n_steps=20):
         self.model          = model
         self.device         = model.device
         self.opt            = Adam(model.parameters(), lr=lr, betas=(0.9, 0.999))
@@ -547,6 +549,10 @@ class FlowTrainer:
         self.results_folder.mkdir(parents=True, exist_ok=True)
         self.step           = 0
         self.best_succ      = -1.0
+        self.print_every    = print_every
+        self.verbose        = verbose
+        self.eval_n_samples = eval_n_samples
+        self.eval_n_steps   = eval_n_steps
 
         kw = make_dataloader_kwargs(self.device, num_workers=num_workers)
         self.train_dl = DataLoader(
@@ -573,6 +579,8 @@ class FlowTrainer:
         self.model.train()
         dl_iter  = iter(self.train_dl)
         losses   = []
+        grad_norms = []
+        free_fracs = []
         t0       = time.time()
         print(f"\n  Training for {self.train_num_steps:,} steps …")
 
@@ -586,16 +594,25 @@ class FlowTrainer:
             self.opt.zero_grad(set_to_none=True)
             loss = self.model.compute_loss(batch)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.opt.step()
 
             losses.append(loss.item())
+            grad_norms.append(float(grad_norm))
+            free_fracs.append(float((~batch.mask.bool()).float().mean().item()))
             self.step += 1
 
-            if self.step % 1000 == 0:
+            if self.step % self.print_every == 0:
                 avg = sum(losses[-200:]) / min(200, len(losses))
+                avg_grad = sum(grad_norms[-200:]) / min(200, len(grad_norms))
+                avg_free = sum(free_fracs[-200:]) / min(200, len(free_fracs))
+                steps_per_sec = self.step / max(time.time() - t0, 1e-8)
                 print(f"  step {self.step:6d}/{self.train_num_steps} | "
-                      f"loss={avg:.5f} | {(time.time()-t0)/60:.1f}min")
+                      f"loss={avg:.5f} | grad={avg_grad:.3f} | "
+                      f"free={avg_free:.2f} | {steps_per_sec:.2f} step/s | "
+                      f"{(time.time()-t0)/60:.1f}min")
+                if self.verbose:
+                    self._print_batch_snapshot(batch)
 
             if self.step % self.save_every == 0:
                 self.save(self.step // self.save_every)
@@ -606,30 +623,78 @@ class FlowTrainer:
 
     @torch.no_grad()
     def _quick_eval(self):
+        from fix_and_eval import check_constraints
+
         self.model.eval()
         print(f"\n  [eval @ step {self.step}]")
         total_s = total_n = 0
+        total_scene_top1 = 0
+        total_scenes = 0
+        per_type = Counter()
+        per_type_total = Counter()
 
         for n_obj, dl in sorted(self.test_dls.items()):
             s = n = 0
-            for batch in dl:
-                poses = _sample_flow_simple(self.model, batch, n_steps=20,
-                                            device=self.device)
-                if _fast_constraint_check(poses, batch, self.model.constraint_types,
-                                          device=self.device):
-                    s += 1
-                n += 1
+            scene_first_try = 0
+            for scene_idx, batch in enumerate(dl):
+                scene_ok = False
+                for trial in range(self.eval_n_samples):
+                    torch.manual_seed(trial * 1000 + n_obj * 100 + scene_idx)
+                    poses = _sample_flow_simple(self.model, batch,
+                                                n_steps=self.eval_n_steps,
+                                                device=self.device)
+                    all_ok, per_c = check_constraints(
+                        poses, batch, self.model.constraint_types,
+                        device=self.device)
+                    if all_ok:
+                        s += 1
+                        scene_ok = True
+                        if trial == 0:
+                            scene_first_try += 1
+                    for _, cinfo in per_c.items():
+                        per_type_total[cinfo['type']] += 1
+                        if cinfo['satisfied']:
+                            per_type[cinfo['type']] += 1
+                    n += 1
+                total_scenes += 1
+                total_scene_top1 += int(scene_ok)
             rate = 100.0 * s / n if n else 0
             total_s += s; total_n += n
-            print(f"    {n_obj} obj: {s}/{n}  ({rate:.1f}%)")
+            top1 = 100.0 * scene_first_try / len(dl) if len(dl) else 0
+            print(f"    {n_obj} obj: {s}/{n}  ({rate:.1f}%)  top1={top1:.1f}%")
 
         overall = 100.0 * total_s / total_n if total_n else 0
-        print(f"    Overall: {overall:.1f}%")
+        overall_top1 = 100.0 * total_scene_top1 / total_scenes if total_scenes else 0
+        print(f"    Overall: {overall:.1f}%  scene_top1={overall_top1:.1f}%")
+        if self.verbose and per_type_total:
+            print("    Per-constraint:")
+            for ct in sorted(per_type_total.keys()):
+                sat = per_type[ct]
+                tot = per_type_total[ct]
+                print(f"      {ct:14s}: {100.0 * sat / max(tot, 1):5.1f}% ({sat}/{tot})")
         if overall > self.best_succ:
             self.best_succ = overall
             self.save('best')
             print(f"    ↑ New best.")
         self.model.train()
+
+    def _print_batch_snapshot(self, batch):
+        x = batch.x
+        mask = batch.mask.bool()
+        edge_attr = batch.edge_attr
+        pose_begin = self.model.dims[-1][1]
+        pose_end = self.model.dims[-1][2]
+        pose = x[:, pose_begin:pose_end]
+        counts = Counter(edge_attr.tolist())
+        named_counts = {
+            self.model.constraint_types[k]: v
+            for k, v in sorted(counts.items())
+            if k < len(self.model.constraint_types)
+        }
+        print(f"    batch snapshot: nodes={x.shape[0]} edges={edge_attr.shape[0]} "
+              f"fixed={int(mask.sum())} free={int((~mask).sum())}")
+        print(f"    pose range: min={pose.min().item():.3f} max={pose.max().item():.3f}")
+        print(f"    constraint mix: {named_counts}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -711,13 +776,27 @@ def main():
     parser.add_argument('-device',          type=str,   default=None,
                         choices=['cuda', 'mps', 'cpu'])
     parser.add_argument('-num_workers',     type=int,   default=0)
+    parser.add_argument('-print_every',     type=int,   default=250)
+    parser.add_argument('--verbose',        action='store_true')
+    parser.add_argument('-eval_n_samples',  type=int,   default=1)
+    parser.add_argument('-eval_n_steps',    type=int,   default=20)
     args = parser.parse_args()
 
     device = get_best_device(args.device)
     print(f"  Device : {device}")
+    print(f"  Config : input_mode={args.input_mode} hidden_dim={args.hidden_dim} "
+          f"batch_size={args.batch_size} lr={args.lr} steps={args.train_num_steps:,}")
+    print(f"  Runtime: num_workers={args.num_workers} print_every={args.print_every} "
+          f"eval_n_samples={args.eval_n_samples} eval_n_steps={args.eval_n_steps} "
+          f"verbose={args.verbose}")
 
     train_task, test_tasks, dims, constraint_types = get_data_config(args.input_mode)
     results_dir = args.results_dir or f'./logs/flow_{args.input_mode}_h{args.hidden_dim}'
+    print(f"  Train task: {train_task}")
+    print(f"  Test tasks : {test_tasks}")
+    print(f"  Dims      : {dims}")
+    print(f"  Constraints ({len(constraint_types)}): {constraint_types}")
+    print(f"  Results   : {results_dir}")
 
     ds_kw = dict(input_mode=args.input_mode, pre_transform=pre_transform, visualize=False)
     train_dataset = GraphDataset(train_task, **ds_kw)
@@ -741,7 +820,11 @@ def main():
                           train_num_steps=args.train_num_steps,
                           save_every=args.save_every,
                           results_folder=results_dir,
-                          num_workers=args.num_workers)
+                          num_workers=args.num_workers,
+                          print_every=args.print_every,
+                          verbose=args.verbose,
+                          eval_n_samples=args.eval_n_samples,
+                          eval_n_steps=args.eval_n_steps)
     if args.resume:
         trainer.load(args.resume)
     trainer.train()

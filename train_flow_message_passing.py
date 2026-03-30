@@ -66,6 +66,10 @@ def main():
     parser.add_argument('-device', type=str, default=None,
                         choices=['cuda', 'mps', 'cpu'])
     parser.add_argument('-num_workers', type=int, default=4)
+    parser.add_argument('-print_every', type=int, default=250)
+    parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('-eval_n_samples', type=int, default=1)
+    parser.add_argument('-eval_n_steps', type=int, default=20)
     args = parser.parse_args()
 
     device = get_best_device(args.device)
@@ -75,6 +79,17 @@ def main():
     results_dir = args.results_dir or (
         f'./logs/flow_mp_{args.input_mode}_h{args.hidden_dim}_r{args.n_rounds}'
     )
+    print(f'  Config : input_mode={args.input_mode} hidden_dim={args.hidden_dim} '
+          f'n_rounds={args.n_rounds} batch_size={args.batch_size} lr={args.lr} '
+          f'steps={args.train_num_steps:,}')
+    print(f'  Runtime: num_workers={args.num_workers} print_every={args.print_every} '
+          f'eval_n_samples={args.eval_n_samples} eval_n_steps={args.eval_n_steps} '
+          f'verbose={args.verbose}')
+    print(f'  Train task: {train_task}')
+    print(f'  Test tasks : {test_tasks}')
+    print(f'  Dims      : {dims}')
+    print(f'  Constraints ({len(constraint_types)}): {constraint_types}')
+    print(f'  Results   : {results_dir}')
 
     validate_dataset_dir(train_task)
     for _, task_name in test_tasks.items():
@@ -116,6 +131,10 @@ def main():
         save_every=args.save_every,
         results_folder=results_dir,
         num_workers=args.num_workers,
+        print_every=args.print_every,
+        verbose=args.verbose,
+        eval_n_samples=args.eval_n_samples,
+        eval_n_steps=args.eval_n_steps,
     )
 
     if args.resume:

@@ -158,7 +158,7 @@ def default_checkpoint_path(args):
 
 
 def evaluate_sampler(model, sampler_fn, constraint_types, input_mode='qualitative',
-                     n_samples=10, device='cuda', label=''):
+                     n_samples=10, device='cuda', label='', verbose=False):
     _, test_tasks, _, _ = get_data_config(input_mode)
 
     results = {}
@@ -176,6 +176,7 @@ def evaluate_sampler(model, sampler_fn, constraint_types, input_mode='qualitativ
             'total': 0,
             'times': [],
             'per_type': defaultdict(lambda: [0, 0]),
+            'constraint_sat_rates': [],
         }
         scene_succeeded = set()
         scene_first_try = set()
@@ -198,6 +199,9 @@ def evaluate_sampler(model, sampler_fn, constraint_types, input_mode='qualitativ
                     if trial == 0:
                         scene_first_try.add(scene_idx)
 
+                n_sat = sum(1 for _, cinfo in per_c.items() if cinfo['satisfied'])
+                stats['constraint_sat_rates'].append(
+                    n_sat / max(len(per_c), 1) if per_c else 0.0)
                 for _, cinfo in per_c.items():
                     stats['per_type'][cinfo['type']][1] += 1
                     if cinfo['satisfied']:
@@ -207,13 +211,21 @@ def evaluate_sampler(model, sampler_fn, constraint_types, input_mode='qualitativ
         top1 = 100.0 * len(scene_first_try) / max(n_scenes, 1)
         topk = 100.0 * len(scene_succeeded) / max(n_scenes, 1)
         avg_time = 1000.0 * np.mean(stats['times']) if stats['times'] else 0.0
+        avg_sat = 100.0 * np.mean(stats['constraint_sat_rates']) if stats['constraint_sat_rates'] else 0.0
 
-        print(f'trial={trial_rate:.1f}%  top1={top1:.1f}%  topk={topk:.1f}%  time={avg_time:.0f}ms')
+        print(f'trial={trial_rate:.1f}%  top1={top1:.1f}%  topk={topk:.1f}%  '
+              f'avg_sat={avg_sat:.1f}%  time={avg_time:.0f}ms')
+        if verbose:
+            print('    per-constraint:')
+            for ct in sorted(stats['per_type'].keys()):
+                sat, tot = stats['per_type'][ct]
+                print(f'      {ct:14s}: {100.0 * sat / max(tot, 1):5.1f}% ({sat}/{tot})')
         results[n_obj] = {
             'trial_rate': trial_rate,
             'scene_top1': top1,
             'scene_topk': topk,
             'avg_time_ms': avg_time,
+            'avg_constraint_sat': avg_sat,
             'stats': stats,
         }
 
@@ -227,6 +239,7 @@ def print_summary(name, results):
         r = results[n_obj]
         print(f"  {n_obj} obj: trial={r['trial_rate']:.1f}%  "
               f"top1={r['scene_top1']:.1f}%  topk={r['scene_topk']:.1f}%  "
+              f"avg_sat={r['avg_constraint_sat']:.1f}%  "
               f"time={r['avg_time_ms']:.0f}ms")
 
 
@@ -245,6 +258,7 @@ def main():
     parser.add_argument('--n_samples', type=int, default=10)
     parser.add_argument('--compare_pure', action='store_true')
     parser.add_argument('--device', choices=['cuda', 'mps', 'cpu'], default=None)
+    parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
     device = get_best_device(args.device)
@@ -257,7 +271,11 @@ def main():
     model.eval()
 
     print(f'Loaded {args.model} checkpoint: {ckpt_path}')
-    print(f'n_steps={args.n_steps}  n_restarts={args.n_restarts}  restart_noise={args.restart_noise}')
+    print(f'Config: model={args.model} input_mode={args.input_mode} hidden_dim={args.hidden_dim} '
+          f'n_rounds={args.n_rounds}')
+    print(f'Sampler: n_steps={args.n_steps} n_restarts={args.n_restarts} '
+          f'restart_noise={args.restart_noise} noise_decay={args.noise_decay}')
+    print(f'Eval   : n_samples={args.n_samples} device={device} verbose={args.verbose}')
 
     all_results = {}
 
@@ -271,6 +289,7 @@ def main():
             n_samples=args.n_samples,
             device=device,
             label='Pure',
+            verbose=args.verbose,
         )
 
     def iterative_sampler(m, data, device='cuda'):
@@ -289,6 +308,7 @@ def main():
         n_samples=args.n_samples,
         device=device,
         label='Restart',
+        verbose=args.verbose,
     )
 
     for name, results in all_results.items():
