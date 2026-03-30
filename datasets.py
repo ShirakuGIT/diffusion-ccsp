@@ -5,7 +5,10 @@ from os import listdir
 import shutil
 import numpy as np
 from pprint import pprint
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 from tqdm import tqdm
 from collections import defaultdict
 import torch
@@ -189,6 +192,8 @@ def visualize_dataset(dir_name='RandomSplitWorld(1)_test', input_mode='diffuse_p
 
 
 def analyze_feature_distribution(dir_name='TriangularRandomSplitWorld(10)_test_7_split'):
+    if plt is None:
+        raise ImportError('matplotlib is required for analyze_feature_distribution()')
     features = ['l', 'v3x', 'v3y', 'x1', 'y1', 'cos', 'sin']
     all_features = visualize_dataset(dir_name, visualize=False)
     plt.figure(figsize=(16, 8))
