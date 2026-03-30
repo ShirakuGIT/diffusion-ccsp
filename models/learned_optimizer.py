@@ -35,12 +35,11 @@ def apply_fixed_poses(x, fixed_mask, fixed_values):
 class LearnedOptimizer(nn.Module):
     """Minimal edge-MLP message passing optimizer."""
 
-    def __init__(self, pose_dim, num_edge_types, hidden_dim=256, step_scale=0.1):
+    def __init__(self, pose_dim, num_edge_types, hidden_dim=256):
         super().__init__()
         self.pose_dim = pose_dim
         self.num_edge_types = num_edge_types
         self.hidden_dim = hidden_dim
-        self.step_scale = step_scale
 
         input_dim = 2 * pose_dim + num_edge_types
         self.edge_mlp = nn.Sequential(
@@ -64,7 +63,7 @@ class LearnedOptimizer(nn.Module):
         delta_x = torch.zeros_like(x)
         delta_x.index_add_(0, dst, msg_dst)
         delta_x.index_add_(0, src, msg_src)
-        return self.step_scale * delta_x
+        return delta_x
 
 
 @torch.no_grad()
