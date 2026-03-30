@@ -37,47 +37,49 @@ from train_flow import FlowMatchingCCSP, get_data_config
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def clamp_to_tray(poses, geoms, mask, pose_dim=4):
-    """
-    Hard-clamp object poses to stay inside the tray [0, 2] in normalized coords.
+    poses_out = poses.clone()
 
-    In normalized coordinates:
-        geom = (w, h) where w = obj_width / tray_width
-        pose = (x, y, cos, sin) where x = obj_x / (tray_width/2)
+    # Extract x and y
+    x = poses[:, 0]
+    y = poses[:, 1]
 
-    Object is inside tray when:
-        w ≤ x ≤ 2 - w   (left/right margins)
-        h ≤ y ≤ 2 - h   (top/bottom margins)
+    wi = geoms[:, 0]
+    hi = geoms[:, 1]
 
-    This is the fix for the 0% 'in' constraint satisfaction.
-    """
-    poses_clamped = poses.clone()
-    device = poses.device
+    margin = 0.02
 
-    for i in range(poses.shape[0]):
-        if mask[i]:  # skip tray (conditioned)
-            continue
+    x_min = wi + margin
+    x_max = 2.0 - wi - margin
+    y_min = hi + margin
+    y_max = 2.0 - hi - margin
 
-        wi = geoms[i, 0].item()
-        hi = geoms[i, 1].item()
+    # Handle degenerate cases
+    x_center = torch.full_like(x_min, 1.0)
+    y_center = torch.full_like(y_min, 1.0)
 
-        # Clamp x to [wi + margin, 2 - wi - margin]
-        margin = 0.02
-        x_min = wi + margin
-        x_max = 2.0 - wi - margin
-        y_min = hi + margin
-        y_max = 2.0 - hi - margin
+    x_min = torch.where(x_min >= x_max, x_center, x_min)
+    x_max = torch.where(x_min >= x_max, x_center, x_max)
+    y_min = torch.where(y_min >= y_max, y_center, y_min)
+    y_max = torch.where(y_min >= y_max, y_center, y_max)
 
-        # Ensure valid range
-        if x_min >= x_max:
-            x_min = x_max = 1.0
-        if y_min >= y_max:
-            y_min = y_max = 1.0
+    # Clamp (OUT-OF-PLACE)
+    x_clamped = torch.clamp(x, x_min, x_max)
+    y_clamped = torch.clamp(y, y_min, y_max)
 
-        poses_clamped[i, 0] = poses_clamped[i, 0].clamp(x_min, x_max)
-        poses_clamped[i, 1] = poses_clamped[i, 1].clamp(y_min, y_max)
+    # Respect mask (do NOT modify fixed nodes)
+    if mask is not None:
+        x_clamped = torch.where(mask, x, x_clamped)
+        y_clamped = torch.where(mask, y, y_clamped)
 
-    return poses_clamped
+    # Reconstruct tensor (NO in-place ops)
+    poses_out = poses.clone()
+    poses_out = torch.cat([
+        x_clamped.unsqueeze(1),
+        y_clamped.unsqueeze(1),
+        poses[:, 2:]
+    ], dim=1)
 
+    return poses_out
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIX 2: Fixed sampling functions with clamping
