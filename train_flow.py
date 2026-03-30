@@ -102,6 +102,29 @@ def _infer_input_mode(constraint_types):
     return 'diffuse_pairwise'
 
 
+def get_best_device(preferred=None):
+    if preferred is not None:
+        return preferred
+    if torch.cuda.is_available():
+        return 'cuda'
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
+
+
+def make_dataloader_kwargs(device, num_workers=0):
+    use_cuda = device == 'cuda'
+    kw = dict(
+        pin_memory=use_cuda,
+        num_workers=num_workers,
+    )
+    if num_workers > 0:
+        kw['persistent_workers'] = True
+        if use_cuda:
+            kw['prefetch_factor'] = 2
+    return kw
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Sinusoidal time embedding (shared with ConstraintDiffuser)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -513,7 +536,8 @@ def load_flow_checkpoint(ckpt_path, dims, hidden_dim, constraint_types,
 class FlowTrainer:
     def __init__(self, model, train_dataset, test_datasets,
                  lr=5e-4, batch_size=128, train_num_steps=200000,
-                 save_every=10000, results_folder='./logs/flow'):
+                 save_every=10000, results_folder='./logs/flow',
+                 num_workers=0):
         self.model          = model
         self.device         = model.device
         self.opt            = Adam(model.parameters(), lr=lr, betas=(0.9, 0.999))
@@ -524,7 +548,7 @@ class FlowTrainer:
         self.step           = 0
         self.best_succ      = -1.0
 
-        kw = dict(pin_memory=True, num_workers=0)
+        kw = make_dataloader_kwargs(self.device, num_workers=num_workers)
         self.train_dl = DataLoader(
             train_dataset, batch_size=batch_size, shuffle=True, **kw)
         self.test_dls = {
@@ -684,9 +708,12 @@ def main():
     parser.add_argument('-save_every',      type=int,   default=10000)
     parser.add_argument('-results_dir',     type=str,   default=None)
     parser.add_argument('-resume',          type=str,   default=None)
+    parser.add_argument('-device',          type=str,   default=None,
+                        choices=['cuda', 'mps', 'cpu'])
+    parser.add_argument('-num_workers',     type=int,   default=0)
     args = parser.parse_args()
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = get_best_device(args.device)
     print(f"  Device : {device}")
 
     train_task, test_tasks, dims, constraint_types = get_data_config(args.input_mode)
@@ -713,7 +740,8 @@ def main():
                           lr=args.lr, batch_size=args.batch_size,
                           train_num_steps=args.train_num_steps,
                           save_every=args.save_every,
-                          results_folder=results_dir)
+                          results_folder=results_dir,
+                          num_workers=args.num_workers)
     if args.resume:
         trainer.load(args.resume)
     trainer.train()

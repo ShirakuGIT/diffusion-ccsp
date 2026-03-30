@@ -19,6 +19,8 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+
 import numpy as np
 import torch
 from torch_geometric.loader import DataLoader
@@ -32,7 +34,7 @@ sys.path.insert(0, str(ROOT.parent / 'Jacinle'))
 from datasets import GraphDataset
 from networks.data_transforms import pre_transform
 from fix_and_eval import clamp_to_tray, check_constraints
-from train_flow import FlowMatchingCCSP, get_data_config
+from train_flow import FlowMatchingCCSP, get_best_device, get_data_config
 from flow_message_passing import MessagePassingFlowMatchingCCSP
 
 
@@ -242,9 +244,10 @@ def main():
     parser.add_argument('--noise_decay', type=float, default=0.5)
     parser.add_argument('--n_samples', type=int, default=10)
     parser.add_argument('--compare_pure', action='store_true')
+    parser.add_argument('--device', choices=['cuda', 'mps', 'cpu'], default=None)
     args = parser.parse_args()
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = get_best_device(args.device)
     _, _, dims, constraint_types = get_data_config(args.input_mode)
 
     model = build_model(args, dims, constraint_types, device)

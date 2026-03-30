@@ -15,6 +15,8 @@ import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+
 import torch
 from torch_geometric.loader import DataLoader
 
@@ -26,7 +28,7 @@ sys.path.insert(0, str(ROOT.parent / 'Jacinle'))
 
 from datasets import GraphDataset
 from networks.data_transforms import pre_transform
-from train_flow import FlowTrainer, get_data_config
+from train_flow import FlowTrainer, get_best_device, get_data_config
 from flow_message_passing import MessagePassingFlowMatchingCCSP
 
 
@@ -61,9 +63,12 @@ def main():
     parser.add_argument('-save_every', type=int, default=10000)
     parser.add_argument('-results_dir', type=str, default=None)
     parser.add_argument('-resume', type=str, default=None)
+    parser.add_argument('-device', type=str, default=None,
+                        choices=['cuda', 'mps', 'cpu'])
+    parser.add_argument('-num_workers', type=int, default=4)
     args = parser.parse_args()
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = get_best_device(args.device)
     print(f'  Device : {device}')
 
     train_task, test_tasks, dims, constraint_types = get_data_config(args.input_mode)
@@ -110,6 +115,7 @@ def main():
         train_num_steps=args.train_num_steps,
         save_every=args.save_every,
         results_folder=results_dir,
+        num_workers=args.num_workers,
     )
 
     if args.resume:
