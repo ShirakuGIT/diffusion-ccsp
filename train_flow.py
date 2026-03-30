@@ -685,7 +685,7 @@ class FlowTrainer:
         pose_begin = self.model.dims[-1][1]
         pose_end = self.model.dims[-1][2]
         pose = x[:, pose_begin:pose_end]
-        counts = Counter(edge_attr.tolist())
+        counts = Counter(int(v) for v in edge_attr.tolist())
         named_counts = {
             self.model.constraint_types[k]: v
             for k, v in sorted(counts.items())
