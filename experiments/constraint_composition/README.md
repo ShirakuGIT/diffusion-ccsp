@@ -57,3 +57,12 @@ python -m experiments.constraint_composition.runner \
   --max-scenes 20 \
   --steps 40
 ```
+
+Unrolled vector field:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite vector_unrolled \
+  --max-scenes 20 \
+  --steps 40
+```
