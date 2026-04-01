@@ -48,3 +48,12 @@ python -m experiments.constraint_composition.runner \
   --max-scenes 20 \
   --steps 40
 ```
+
+Vector field:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite vector \
+  --max-scenes 20 \
+  --steps 40
+```

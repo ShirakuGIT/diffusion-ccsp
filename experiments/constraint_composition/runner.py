@@ -22,6 +22,7 @@ from experiments.constraint_composition.methods import (
     langevin_methods,
     projection_methods,
     prototype_methods,
+    vector_field_methods,
 )
 from experiments.constraint_composition.global_energy_dataset import build_global_dataset
 from experiments.constraint_composition.global_energy_model import train_global_energy_model
@@ -29,6 +30,8 @@ from experiments.constraint_composition.learned_energy_dataset import build_cons
 from experiments.constraint_composition.learned_energy_model import train_constraint_models
 from experiments.constraint_composition.metrics import aggregate_method_runs, evaluate_trajectory
 from experiments.constraint_composition.prototypes import build_prototypes
+from experiments.constraint_composition.vector_field_dataset import build_vector_field_dataset
+from experiments.constraint_composition.vector_field_model import train_vector_field_model
 
 
 DEFAULT_TASKS = {
@@ -169,6 +172,39 @@ def select_methods(args, scenes):
             'batch_size': int(args.global_batch_size),
             'lr': float(args.global_lr),
             'seed': int(args.global_seed),
+            'train_stats': train_stats,
+        }
+    if args.suite == 'vector':
+        x_arr, v_arr = build_vector_field_dataset(
+            scenes,
+            num_samples=args.vector_dataset_samples,
+            step_size=args.step_size,
+            fd_eps=args.vector_fd_eps,
+            seed=args.vector_seed,
+            max_nodes=args.max_objects,
+        )
+        bundle, train_stats = train_vector_field_model(
+            x_arr,
+            v_arr,
+            epochs=args.vector_epochs,
+            batch_size=args.vector_batch_size,
+            lr=args.vector_lr,
+            seed=args.vector_seed,
+            device='cpu',
+            max_nodes=args.max_objects,
+        )
+        methods = vector_field_methods(
+            step_size=args.step_size,
+            bundle=bundle,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'dataset_samples': int(args.vector_dataset_samples),
+            'epochs': int(args.vector_epochs),
+            'batch_size': int(args.vector_batch_size),
+            'lr': float(args.vector_lr),
+            'seed': int(args.vector_seed),
             'train_stats': train_stats,
         }
     return exploratory_methods(step_size=args.step_size), None
@@ -359,6 +395,12 @@ def run_experiment(args) -> Dict[str, object]:
             'global_lr': args.global_lr,
             'global_fd_eps': args.global_fd_eps,
             'global_seed': args.global_seed,
+            'vector_dataset_samples': args.vector_dataset_samples,
+            'vector_epochs': args.vector_epochs,
+            'vector_batch_size': args.vector_batch_size,
+            'vector_lr': args.vector_lr,
+            'vector_fd_eps': args.vector_fd_eps,
+            'vector_seed': args.vector_seed,
             'feasibility_eps': args.feasibility_eps,
             'plateau_threshold': args.plateau_threshold,
             'seed': args.seed,
@@ -418,7 +460,7 @@ def maybe_plot_summary(summary: Dict[str, object], output_path: Path) -> Path | 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Constraint composition experiment harness')
-    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'explore'])
+    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'vector', 'explore'])
     parser.add_argument('--split', type=int, default=3, choices=sorted(DEFAULT_TASKS))
     parser.add_argument('--max-scenes', type=int, default=20)
     parser.add_argument('--min-objects', type=int, default=3)
@@ -452,6 +494,12 @@ def parse_args():
     parser.add_argument('--global-lr', type=float, default=1e-3)
     parser.add_argument('--global-fd-eps', type=float, default=1e-3)
     parser.add_argument('--global-seed', type=int, default=0)
+    parser.add_argument('--vector-dataset-samples', type=int, default=5000)
+    parser.add_argument('--vector-epochs', type=int, default=10)
+    parser.add_argument('--vector-batch-size', type=int, default=128)
+    parser.add_argument('--vector-lr', type=float, default=1e-3)
+    parser.add_argument('--vector-fd-eps', type=float, default=1e-3)
+    parser.add_argument('--vector-seed', type=int, default=0)
     parser.add_argument('--seed', type=int, default=7)
     parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cpu', 'mps', 'cuda'])
     parser.add_argument('--output', type=str, default=None)

@@ -14,6 +14,7 @@ from experiments.constraint_composition.core import (
 from experiments.constraint_composition.global_energy_model import LearnedGlobalEnergy
 from experiments.constraint_composition.learned_energy_model import LearnedConstraintEnergy
 from experiments.constraint_composition.prototypes import numerical_grad, prototype_energy
+from experiments.constraint_composition.vector_field_model import LearnedVectorField
 
 
 @dataclass
@@ -241,6 +242,32 @@ def make_global_energy(step_size: float,
     return Method(name='global_energy', step_fn=step)
 
 
+def vector_field_step(scene: SceneSpec, poses: np.ndarray, bundle: LearnedVectorField) -> np.ndarray:
+    from experiments.constraint_composition.global_features import extract_global_features
+
+    phi = extract_global_features(poses, scene, max_nodes=bundle.max_nodes).astype(np.float32)
+    phi_norm = (phi - bundle.mean) / bundle.std
+    if np.isnan(phi_norm).any():
+        raise ValueError('NaNs detected in normalized vector-field features during inference.')
+
+    x_tensor = torch.tensor(phi_norm, dtype=torch.float32).unsqueeze(0)
+    with torch.no_grad():
+        v_flat = bundle.model(x_tensor).squeeze(0).cpu().numpy().astype(np.float32, copy=False)
+
+    v_padded = v_flat.reshape(bundle.max_nodes, 2)
+    update = np.zeros_like(poses, dtype=np.float32)
+    update[:scene.num_nodes, :2] = v_padded[:scene.num_nodes]
+    update[scene.mask] = 0.0
+    return update
+
+
+def make_vector_field_method(bundle: LearnedVectorField) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        return vector_field_step(scene, poses, bundle)
+
+    return Method(name='vector_field', step_fn=step)
+
+
 def make_sequential_projection(step_size: float, ordering: str = 'descending', passes: int = 2) -> Method:
     def step(scene: SceneSpec, poses: np.ndarray, rng: np.random.Generator | None = None, **_: object) -> np.ndarray:
         state = poses.copy()
@@ -366,4 +393,15 @@ def global_energy_methods(step_size: float,
         make_energy_descent(step_size=step_size, normalized=False),
         make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
         make_global_energy(step_size=step_size, bundle=bundle, fd_eps=fd_eps),
+    ]
+
+
+def vector_field_methods(step_size: float,
+                         bundle: LearnedVectorField,
+                         alpha: float = 1.0,
+                         projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_vector_field_method(bundle=bundle),
     ]
