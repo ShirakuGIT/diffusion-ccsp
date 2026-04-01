@@ -18,12 +18,22 @@ from experiments.constraint_composition.core import scene_from_data
 from experiments.constraint_composition.methods import (
     exploratory_methods,
     global_energy_methods,
+    graph_noise_methods,
+    graph_score_methods,
+    graph_score_plus_methods,
     learned_energy_methods,
     langevin_methods,
     projection_methods,
     prototype_methods,
     vector_field_methods,
+    vector_time_methods,
 )
+from experiments.constraint_composition.graph_noise_dataset import build_graph_noise_dataset
+from experiments.constraint_composition.graph_flow_dataset import build_graph_flow_dataset
+from experiments.constraint_composition.graph_score_dataset import build_graph_score_dataset
+from experiments.constraint_composition.graph_score_plus_dataset import build_graph_score_plus_dataset
+from experiments.constraint_composition.graph_dagger import train_graph_dagger
+from experiments.constraint_composition.graph_noise_model import train_graph_vector_field
 from experiments.constraint_composition.global_energy_dataset import build_global_dataset
 from experiments.constraint_composition.global_energy_model import train_global_energy_model
 from experiments.constraint_composition.learned_energy_dataset import build_constraint_dataset
@@ -33,6 +43,8 @@ from experiments.constraint_composition.prototypes import build_prototypes
 from experiments.constraint_composition.vector_field_dataset import build_vector_field_dataset
 from experiments.constraint_composition.vector_field_dataset_unrolled import build_vector_field_dataset_unrolled
 from experiments.constraint_composition.vector_field_model import train_vector_field_model
+from experiments.constraint_composition.vector_field_dataset_time import build_vector_field_dataset_time
+from experiments.constraint_composition.vector_field_time_model import train_time_vector_field_model
 
 
 DEFAULT_TASKS = {
@@ -244,6 +256,198 @@ def select_methods(args, scenes):
             'seed': int(args.vector_seed),
             'train_stats': train_stats,
         }
+    if args.suite == 'vector_time':
+        x_arr, v_arr = build_vector_field_dataset_time(
+            scenes,
+            num_trajectories=args.vector_num_trajectories,
+            rollout_steps=args.vector_rollout_steps,
+            step_size=args.step_size,
+            fd_eps=args.vector_fd_eps,
+            seed=args.vector_seed,
+            max_nodes=args.max_objects,
+        )
+        bundle, train_stats = train_time_vector_field_model(
+            x_arr,
+            v_arr,
+            epochs=args.vector_epochs,
+            batch_size=args.vector_batch_size,
+            lr=args.vector_lr,
+            seed=args.vector_seed,
+            device='cpu',
+            max_nodes=args.max_objects,
+        )
+        methods = vector_time_methods(
+            step_size=args.step_size,
+            bundle=bundle,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'num_trajectories': int(args.vector_num_trajectories),
+            'rollout_steps': int(args.vector_rollout_steps),
+            'dataset_samples': int(x_arr.shape[0]),
+            'epochs': int(args.vector_epochs),
+            'batch_size': int(args.vector_batch_size),
+            'lr': float(args.vector_lr),
+            'seed': int(args.vector_seed),
+            'train_stats': train_stats,
+        }
+    if args.suite == 'graph_noise':
+        dataset = build_graph_noise_dataset(
+            scenes,
+            num_trajectories=args.graph_noise_trajectories,
+            rollout_steps=args.graph_noise_rollout_steps,
+            seed=args.graph_noise_seed,
+        )
+        bundle, train_stats = train_graph_vector_field(
+            dataset,
+            epochs=args.graph_noise_epochs,
+            batch_size=args.graph_noise_batch_size,
+            lr=args.graph_noise_lr,
+            seed=args.graph_noise_seed,
+            device='cpu',
+        )
+        methods = graph_noise_methods(
+            step_size=args.step_size,
+            bundle=bundle,
+            method_name='graph_noise_vector_field',
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'num_trajectories': int(args.graph_noise_trajectories),
+            'rollout_steps': int(args.graph_noise_rollout_steps),
+            'dataset_samples': int(len(dataset)),
+            'epochs': int(args.graph_noise_epochs),
+            'batch_size': int(args.graph_noise_batch_size),
+            'lr': float(args.graph_noise_lr),
+            'seed': int(args.graph_noise_seed),
+            'train_stats': train_stats,
+        }
+    if args.suite == 'graph_flow':
+        dataset = build_graph_flow_dataset(
+            scenes,
+            num_trajectories=args.graph_noise_trajectories,
+            rollout_steps=args.graph_noise_rollout_steps,
+            step_size=args.step_size,
+            fd_eps=args.vector_fd_eps,
+            seed=args.graph_noise_seed,
+        )
+        bundle, train_stats = train_graph_vector_field(
+            dataset,
+            epochs=args.graph_noise_epochs,
+            batch_size=args.graph_noise_batch_size,
+            lr=args.graph_noise_lr,
+            seed=args.graph_noise_seed,
+            device='cpu',
+        )
+        methods = graph_noise_methods(
+            step_size=args.step_size,
+            bundle=bundle,
+            method_name='graph_flow_matching',
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'num_trajectories': int(args.graph_noise_trajectories),
+            'rollout_steps': int(args.graph_noise_rollout_steps),
+            'dataset_samples': int(len(dataset)),
+            'epochs': int(args.graph_noise_epochs),
+            'batch_size': int(args.graph_noise_batch_size),
+            'lr': float(args.graph_noise_lr),
+            'seed': int(args.graph_noise_seed),
+            'train_stats': train_stats,
+        }
+    if args.suite == 'graph_dagger':
+        bundle, aux = train_graph_dagger(
+            scenes,
+            base_num_trajectories=args.graph_noise_trajectories,
+            rollout_steps=args.graph_noise_rollout_steps,
+            rounds=args.graph_dagger_rounds,
+            rollout_trajectories=args.graph_dagger_rollout_trajectories,
+            seed=args.graph_noise_seed,
+            epochs=args.graph_noise_epochs,
+            batch_size=args.graph_noise_batch_size,
+            lr=args.graph_noise_lr,
+            device='cpu',
+        )
+        methods = graph_noise_methods(
+            step_size=args.step_size,
+            bundle=bundle,
+            method_name='graph_dagger_vector_field',
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, aux
+    if args.suite == 'graph_score':
+        dataset = build_graph_score_dataset(
+            scenes,
+            num_samples=args.graph_score_samples,
+            noise_scale=args.graph_score_noise_scale,
+            fd_eps=args.graph_score_fd_eps,
+            seed=args.graph_score_seed,
+        )
+        bundle, train_stats = train_graph_vector_field(
+            dataset,
+            epochs=args.graph_score_epochs,
+            batch_size=args.graph_score_batch_size,
+            lr=args.graph_score_lr,
+            seed=args.graph_score_seed,
+            device='cpu',
+        )
+        methods = graph_score_methods(
+            step_size=args.step_size,
+            bundle=bundle,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'dataset_samples': int(len(dataset)),
+            'noise_scale': float(args.graph_score_noise_scale),
+            'epochs': int(args.graph_score_epochs),
+            'batch_size': int(args.graph_score_batch_size),
+            'lr': float(args.graph_score_lr),
+            'fd_eps': float(args.graph_score_fd_eps),
+            'seed': int(args.graph_score_seed),
+            'train_stats': train_stats,
+        }
+    if args.suite == 'graph_score_plus':
+        dataset = build_graph_score_plus_dataset(
+            scenes,
+            num_samples=args.graph_score_plus_samples,
+            sigma_min=args.graph_score_plus_sigma_min,
+            sigma_max=args.graph_score_plus_sigma_max,
+            fd_eps=args.graph_score_plus_fd_eps,
+            seed=args.graph_score_plus_seed,
+        )
+        bundle, train_stats = train_graph_vector_field(
+            dataset,
+            epochs=args.graph_score_plus_epochs,
+            batch_size=args.graph_score_plus_batch_size,
+            lr=args.graph_score_plus_lr,
+            seed=args.graph_score_plus_seed,
+            device='cpu',
+        )
+        methods = graph_score_plus_methods(
+            step_size=args.step_size,
+            bundle=bundle,
+            sigma=args.graph_score_plus_infer_sigma,
+            fd_eps=args.graph_score_plus_fd_eps,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'dataset_samples': int(len(dataset)),
+            'sigma_min': float(args.graph_score_plus_sigma_min),
+            'sigma_max': float(args.graph_score_plus_sigma_max),
+            'infer_sigma': float(args.graph_score_plus_infer_sigma),
+            'epochs': int(args.graph_score_plus_epochs),
+            'batch_size': int(args.graph_score_plus_batch_size),
+            'lr': float(args.graph_score_plus_lr),
+            'fd_eps': float(args.graph_score_plus_fd_eps),
+            'seed': int(args.graph_score_plus_seed),
+            'train_stats': train_stats,
+        }
     return exploratory_methods(step_size=args.step_size), None
 
 
@@ -440,6 +644,30 @@ def run_experiment(args) -> Dict[str, object]:
             'vector_lr': args.vector_lr,
             'vector_fd_eps': args.vector_fd_eps,
             'vector_seed': args.vector_seed,
+            'graph_noise_trajectories': args.graph_noise_trajectories,
+            'graph_noise_rollout_steps': args.graph_noise_rollout_steps,
+            'graph_noise_epochs': args.graph_noise_epochs,
+            'graph_noise_batch_size': args.graph_noise_batch_size,
+            'graph_noise_lr': args.graph_noise_lr,
+            'graph_noise_seed': args.graph_noise_seed,
+            'graph_dagger_rounds': args.graph_dagger_rounds,
+            'graph_dagger_rollout_trajectories': args.graph_dagger_rollout_trajectories,
+            'graph_score_samples': args.graph_score_samples,
+            'graph_score_noise_scale': args.graph_score_noise_scale,
+            'graph_score_epochs': args.graph_score_epochs,
+            'graph_score_batch_size': args.graph_score_batch_size,
+            'graph_score_lr': args.graph_score_lr,
+            'graph_score_fd_eps': args.graph_score_fd_eps,
+            'graph_score_seed': args.graph_score_seed,
+            'graph_score_plus_samples': args.graph_score_plus_samples,
+            'graph_score_plus_sigma_min': args.graph_score_plus_sigma_min,
+            'graph_score_plus_sigma_max': args.graph_score_plus_sigma_max,
+            'graph_score_plus_infer_sigma': args.graph_score_plus_infer_sigma,
+            'graph_score_plus_epochs': args.graph_score_plus_epochs,
+            'graph_score_plus_batch_size': args.graph_score_plus_batch_size,
+            'graph_score_plus_lr': args.graph_score_plus_lr,
+            'graph_score_plus_fd_eps': args.graph_score_plus_fd_eps,
+            'graph_score_plus_seed': args.graph_score_plus_seed,
             'feasibility_eps': args.feasibility_eps,
             'plateau_threshold': args.plateau_threshold,
             'seed': args.seed,
@@ -499,7 +727,7 @@ def maybe_plot_summary(summary: Dict[str, object], output_path: Path) -> Path | 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Constraint composition experiment harness')
-    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'vector', 'vector_unrolled', 'explore'])
+    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'vector', 'vector_unrolled', 'vector_time', 'graph_noise', 'graph_flow', 'graph_dagger', 'graph_score', 'graph_score_plus', 'explore'])
     parser.add_argument('--split', type=int, default=3, choices=sorted(DEFAULT_TASKS))
     parser.add_argument('--max-scenes', type=int, default=20)
     parser.add_argument('--min-objects', type=int, default=3)
@@ -541,6 +769,30 @@ def parse_args():
     parser.add_argument('--vector-lr', type=float, default=1e-3)
     parser.add_argument('--vector-fd-eps', type=float, default=1e-3)
     parser.add_argument('--vector-seed', type=int, default=0)
+    parser.add_argument('--graph-noise-trajectories', type=int, default=1000)
+    parser.add_argument('--graph-noise-rollout-steps', type=int, default=40)
+    parser.add_argument('--graph-noise-epochs', type=int, default=10)
+    parser.add_argument('--graph-noise-batch-size', type=int, default=128)
+    parser.add_argument('--graph-noise-lr', type=float, default=1e-3)
+    parser.add_argument('--graph-noise-seed', type=int, default=0)
+    parser.add_argument('--graph-dagger-rounds', type=int, default=2)
+    parser.add_argument('--graph-dagger-rollout-trajectories', type=int, default=250)
+    parser.add_argument('--graph-score-samples', type=int, default=30000)
+    parser.add_argument('--graph-score-noise-scale', type=float, default=0.2)
+    parser.add_argument('--graph-score-epochs', type=int, default=10)
+    parser.add_argument('--graph-score-batch-size', type=int, default=128)
+    parser.add_argument('--graph-score-lr', type=float, default=1e-3)
+    parser.add_argument('--graph-score-fd-eps', type=float, default=1e-3)
+    parser.add_argument('--graph-score-seed', type=int, default=0)
+    parser.add_argument('--graph-score-plus-samples', type=int, default=30000)
+    parser.add_argument('--graph-score-plus-sigma-min', type=float, default=0.01)
+    parser.add_argument('--graph-score-plus-sigma-max', type=float, default=0.5)
+    parser.add_argument('--graph-score-plus-infer-sigma', type=float, default=0.1)
+    parser.add_argument('--graph-score-plus-epochs', type=int, default=10)
+    parser.add_argument('--graph-score-plus-batch-size', type=int, default=128)
+    parser.add_argument('--graph-score-plus-lr', type=float, default=1e-3)
+    parser.add_argument('--graph-score-plus-fd-eps', type=float, default=1e-3)
+    parser.add_argument('--graph-score-plus-seed', type=int, default=0)
     parser.add_argument('--seed', type=int, default=7)
     parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cpu', 'mps', 'cuda'])
     parser.add_argument('--output', type=str, default=None)

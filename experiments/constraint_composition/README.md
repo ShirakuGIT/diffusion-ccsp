@@ -66,3 +66,57 @@ python -m experiments.constraint_composition.runner \
   --max-scenes 20 \
   --steps 40
 ```
+
+Time-conditioned vector field:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite vector_time \
+  --max-scenes 20 \
+  --steps 40
+```
+
+Graph-conditioned noise field:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite graph_noise \
+  --max-scenes 20 \
+  --steps 40
+```
+
+Graph flow-matching field:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite graph_flow \
+  --max-scenes 20 \
+  --steps 40
+```
+
+Graph DAgger field:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite graph_dagger \
+  --max-scenes 20 \
+  --steps 40
+```
+
+Graph score field:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite graph_score \
+  --max-scenes 20 \
+  --steps 40
+```
+
+Graph score++ field:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite graph_score_plus \
+  --max-scenes 20 \
+  --steps 40
+```

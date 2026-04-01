@@ -8,13 +8,16 @@ import torch
 
 from experiments.constraint_composition.core import (
     SceneSpec,
+    total_violation,
     total_violation_gradient,
     violated_constraint_records,
 )
 from experiments.constraint_composition.global_energy_model import LearnedGlobalEnergy
+from experiments.constraint_composition.graph_noise_model import LearnedGraphVectorField
 from experiments.constraint_composition.learned_energy_model import LearnedConstraintEnergy
 from experiments.constraint_composition.prototypes import numerical_grad, prototype_energy
 from experiments.constraint_composition.vector_field_model import LearnedVectorField
+from experiments.constraint_composition.vector_field_time_model import LearnedTimeVectorField
 
 
 @dataclass
@@ -268,6 +271,177 @@ def make_vector_field_method(bundle: LearnedVectorField) -> Method:
     return Method(name='vector_field', step_fn=step)
 
 
+def vector_field_time_step(
+    scene: SceneSpec,
+    poses: np.ndarray,
+    bundle: LearnedTimeVectorField,
+    step_idx: int,
+    total_steps: int,
+) -> np.ndarray:
+    from experiments.constraint_composition.global_features import extract_global_features
+
+    tau = float(step_idx) / float(max(total_steps, 1))
+    phi = extract_global_features(poses, scene, max_nodes=bundle.max_nodes).astype(np.float32)
+    phi_time = np.concatenate([phi, np.asarray([tau], dtype=np.float32)], axis=0)
+    phi_time = (phi_time - bundle.mean) / bundle.std
+    if np.isnan(phi_time).any():
+        raise ValueError('NaNs detected in normalized time-conditioned features during inference.')
+
+    x_tensor = torch.tensor(phi_time, dtype=torch.float32).unsqueeze(0)
+    with torch.no_grad():
+        v_flat = bundle.model(x_tensor).squeeze(0).cpu().numpy().astype(np.float32, copy=False)
+
+    v_padded = v_flat.reshape(bundle.max_nodes, 2)
+    update = np.zeros_like(poses, dtype=np.float32)
+    update[:scene.num_nodes, :2] = v_padded[:scene.num_nodes]
+    update[scene.mask] = 0.0
+    return update
+
+
+def make_vector_time_method(bundle: LearnedTimeVectorField) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, t: int = 0, T: int = 1, **_: object) -> np.ndarray:
+        return vector_field_time_step(scene, poses, bundle, step_idx=t, total_steps=T)
+
+    return Method(name='vector_time', step_fn=step)
+
+
+def graph_noise_step(
+    scene: SceneSpec,
+    poses: np.ndarray,
+    bundle: LearnedGraphVectorField,
+    step_idx: int,
+    total_steps: int,
+) -> np.ndarray:
+    import torch
+
+    tau = float(step_idx) / float(max(total_steps, 1))
+    tau_column = np.full((scene.num_nodes, 1), tau, dtype=np.float32)
+    mask_column = scene.mask.astype(np.float32).reshape(-1, 1)
+    node_features = np.concatenate([
+        scene.geoms.astype(np.float32, copy=False),
+        poses.astype(np.float32, copy=False),
+        mask_column,
+        tau_column,
+    ], axis=1)
+    node_features = (node_features - bundle.node_mean) / bundle.node_std
+    x_tensor = torch.tensor(node_features, dtype=torch.float32)
+    edge_index = torch.tensor(scene.edge_index.T, dtype=torch.long)
+    edge_attr = torch.tensor(scene.edge_attr, dtype=torch.long)
+    with torch.no_grad():
+        v = bundle.model(x_tensor, edge_index, edge_attr).cpu().numpy().astype(np.float32, copy=False)
+
+    update = np.zeros_like(poses, dtype=np.float32)
+    update[:, :2] = v[:scene.num_nodes]
+    update[scene.mask] = 0.0
+    return update
+
+
+def make_graph_noise_method(bundle: LearnedGraphVectorField, name: str) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, t: int = 0, T: int = 1, **_: object) -> np.ndarray:
+        return graph_noise_step(scene, poses, bundle, step_idx=t, total_steps=T)
+
+    return Method(name=name, step_fn=step)
+
+
+def graph_score_step(
+    scene: SceneSpec,
+    poses: np.ndarray,
+    bundle: LearnedGraphVectorField,
+    step_size: float,
+) -> np.ndarray:
+    import torch
+
+    mask_column = scene.mask.astype(np.float32).reshape(-1, 1)
+    node_features = np.concatenate([
+        scene.geoms.astype(np.float32, copy=False),
+        poses.astype(np.float32, copy=False),
+        mask_column,
+    ], axis=1)
+    node_features = (node_features - bundle.node_mean) / bundle.node_std
+    x_tensor = torch.tensor(node_features, dtype=torch.float32)
+    edge_index = torch.tensor(scene.edge_index.T, dtype=torch.long)
+    edge_attr = torch.tensor(scene.edge_attr, dtype=torch.long)
+    with torch.no_grad():
+        score = bundle.model(x_tensor, edge_index, edge_attr).cpu().numpy().astype(np.float32, copy=False)
+
+    update = np.zeros_like(poses, dtype=np.float32)
+    update[:, :2] = step_size * score[:scene.num_nodes]
+    update[scene.mask] = 0.0
+    return update
+
+
+def make_graph_score_method(bundle: LearnedGraphVectorField, step_size: float, name: str = 'graph_score') -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        return graph_score_step(scene, poses, bundle, step_size=step_size)
+
+    return Method(name=name, step_fn=step)
+
+
+def graph_score_plus_step(
+    scene: SceneSpec,
+    poses: np.ndarray,
+    bundle: LearnedGraphVectorField,
+    step_size: float,
+    sigma: float,
+    fd_eps: float,
+) -> np.ndarray:
+    import torch
+
+    grad = numerical_grad(
+        poses,
+        lambda x: total_violation(scene, scene.clamp(x)),
+        eps=fd_eps,
+    )
+    g = (-grad[:, :2]).astype(np.float32, copy=False)
+    g[scene.mask] = 0.0
+    norm = np.linalg.norm(g, axis=1, keepdims=True).astype(np.float32) + 1e-6
+    g_norm = g / norm
+
+    sigma_col = np.full((scene.num_nodes, 1), sigma, dtype=np.float32)
+    mask_column = scene.mask.astype(np.float32).reshape(-1, 1)
+    node_features = np.concatenate([
+        scene.geoms.astype(np.float32, copy=False),
+        poses.astype(np.float32, copy=False),
+        mask_column,
+        sigma_col,
+    ], axis=1)
+    node_features = (node_features - bundle.node_mean) / bundle.node_std
+    x_tensor = torch.tensor(node_features, dtype=torch.float32)
+    edge_index = torch.tensor(scene.edge_index.T, dtype=torch.long)
+    edge_attr = torch.tensor(scene.edge_attr, dtype=torch.long)
+    with torch.no_grad():
+        residual = bundle.model(x_tensor, edge_index, edge_attr).cpu().numpy().astype(np.float32, copy=False)
+
+    v = g_norm.copy()
+    v[:scene.num_nodes] += residual[:scene.num_nodes]
+    v[scene.mask] = 0.0
+
+    update = np.zeros_like(poses, dtype=np.float32)
+    update[:, :2] = step_size * v
+    update[scene.mask] = 0.0
+    return update
+
+
+def make_graph_score_plus_method(
+    bundle: LearnedGraphVectorField,
+    step_size: float,
+    sigma: float,
+    fd_eps: float,
+    name: str = 'graph_score_plus',
+) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        return graph_score_plus_step(
+            scene,
+            poses,
+            bundle,
+            step_size=step_size,
+            sigma=sigma,
+            fd_eps=fd_eps,
+        )
+
+    return Method(name=name, step_fn=step)
+
+
 def make_sequential_projection(step_size: float, ordering: str = 'descending', passes: int = 2) -> Method:
     def step(scene: SceneSpec, poses: np.ndarray, rng: np.random.Generator | None = None, **_: object) -> np.ndarray:
         state = poses.copy()
@@ -404,4 +578,57 @@ def vector_field_methods(step_size: float,
         make_energy_descent(step_size=step_size, normalized=False),
         make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
         make_vector_field_method(bundle=bundle),
+    ]
+
+
+def vector_time_methods(step_size: float,
+                        bundle: LearnedTimeVectorField,
+                        alpha: float = 1.0,
+                        projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_vector_time_method(bundle=bundle),
+    ]
+
+
+def graph_noise_methods(step_size: float,
+                        bundle: LearnedGraphVectorField,
+                        method_name: str,
+                        alpha: float = 1.0,
+                        projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_graph_noise_method(bundle=bundle, name=method_name),
+    ]
+
+
+def graph_score_methods(step_size: float,
+                        bundle: LearnedGraphVectorField,
+                        alpha: float = 1.0,
+                        projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_graph_score_method(bundle=bundle, step_size=step_size, name='graph_score'),
+    ]
+
+
+def graph_score_plus_methods(step_size: float,
+                             bundle: LearnedGraphVectorField,
+                             sigma: float,
+                             fd_eps: float = 1e-3,
+                             alpha: float = 1.0,
+                             projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_graph_score_plus_method(
+            bundle=bundle,
+            step_size=step_size,
+            sigma=sigma,
+            fd_eps=fd_eps,
+            name='graph_score_plus',
+        ),
     ]
