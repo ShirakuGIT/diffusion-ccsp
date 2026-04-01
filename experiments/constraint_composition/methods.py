@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List
+from typing import Callable, Dict, List
 
 import numpy as np
 
@@ -10,6 +10,7 @@ from experiments.constraint_composition.core import (
     total_violation_gradient,
     violated_constraint_records,
 )
+from experiments.constraint_composition.prototypes import numerical_grad, prototype_energy
 
 
 @dataclass
@@ -153,6 +154,25 @@ def make_projected_energy(step_size: float, alpha: float = 1.0, projection_passe
     return Method(name='projected_energy', step_fn=step)
 
 
+def make_prototype_energy(step_size: float,
+                          prototypes: Dict[str, List[np.ndarray]],
+                          k: int,
+                          tau: float = 0.1,
+                          fd_eps: float = 1e-3) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        grad = numerical_grad(
+            poses,
+            lambda x: prototype_energy(scene, scene.clamp(x), prototypes, tau=tau),
+            eps=fd_eps,
+        )
+        update = -step_size * grad
+        update[scene.mask] = 0.0
+        return update
+
+    tau_label = f'{tau:g}'.replace('.', 'p')
+    return Method(name=f'prototype_energy_k{k}_tau{tau_label}', step_fn=step)
+
+
 def make_sequential_projection(step_size: float, ordering: str = 'descending', passes: int = 2) -> Method:
     def step(scene: SceneSpec, poses: np.ndarray, rng: np.random.Generator | None = None, **_: object) -> np.ndarray:
         state = poses.copy()
@@ -230,4 +250,28 @@ def projection_methods(step_size: float = 0.1,
         ])
     if include_langevin_reference:
         methods.append(make_energy_langevin(step_size=step_size, noise_scale=0.1, anneal=True))
+    return methods
+
+
+def prototype_methods(step_size: float,
+                      prototypes_by_k: Dict[int, Dict[str, List[np.ndarray]]],
+                      tau_values: List[float],
+                      fd_eps: float = 1e-3,
+                      alpha: float = 1.0,
+                      projection_passes: int = 3) -> List[Method]:
+    methods = [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+    ]
+    for k in sorted(prototypes_by_k):
+        for tau in tau_values:
+            methods.append(
+                make_prototype_energy(
+                    step_size=step_size,
+                    prototypes=prototypes_by_k[k],
+                    k=k,
+                    tau=tau,
+                    fd_eps=fd_eps,
+                )
+            )
     return methods

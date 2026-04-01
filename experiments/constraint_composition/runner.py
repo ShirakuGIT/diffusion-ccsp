@@ -15,8 +15,14 @@ from networks.data_transforms import pre_transform
 from networks.denoise_fn import qualitative_constraints
 
 from experiments.constraint_composition.core import scene_from_data
-from experiments.constraint_composition.methods import exploratory_methods, langevin_methods, projection_methods
+from experiments.constraint_composition.methods import (
+    exploratory_methods,
+    langevin_methods,
+    projection_methods,
+    prototype_methods,
+)
 from experiments.constraint_composition.metrics import aggregate_method_runs, evaluate_trajectory
+from experiments.constraint_composition.prototypes import build_prototypes
 
 
 DEFAULT_TASKS = {
@@ -65,13 +71,13 @@ def rollout(scene, method, x0: np.ndarray, steps: int, rng: np.random.Generator)
     return trajectory
 
 
-def select_methods(args):
+def select_methods(args, scenes):
     if args.suite == 'langevin':
         return langevin_methods(
             step_size=args.step_size,
             noise_scales=args.noise_scales,
             include_annealed=args.include_annealed,
-        )
+        ), None
     if args.suite == 'projection':
         return projection_methods(
             step_size=args.step_size,
@@ -80,8 +86,25 @@ def select_methods(args):
             sequential_passes=args.sequential_passes,
             include_langevin_reference=not args.no_langevin_reference,
             include_sequential_variants=args.include_sequential_variants,
+        ), None
+    if args.suite == 'prototype':
+        prototypes_by_k, prototype_stats = build_prototypes(
+            scenes,
+            num_samples=args.prototype_samples,
+            k_values=args.prototype_k,
+            diversity_threshold=args.prototype_diversity_threshold,
+            seed=args.seed,
         )
-    return exploratory_methods(step_size=args.step_size)
+        methods = prototype_methods(
+            step_size=args.step_size,
+            prototypes_by_k=prototypes_by_k,
+            tau_values=args.prototype_tau,
+            fd_eps=args.prototype_fd_eps,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, prototype_stats
+    return exploratory_methods(step_size=args.step_size), None
 
 
 def build_recommendation(summary: Dict[str, object]) -> Dict[str, object]:
@@ -193,7 +216,7 @@ def run_experiment(args) -> Dict[str, object]:
             f'No scenes matched object-count filter {args.min_objects}-{args.max_objects} '
             f'for task {task_name}.'
         )
-    methods = select_methods(args)
+    methods, prototype_stats = select_methods(args, scenes)
 
     results: Dict[str, List[Dict[str, object]]] = defaultdict(list)
     trials = []
@@ -252,11 +275,17 @@ def run_experiment(args) -> Dict[str, object]:
             'sequential_passes': args.sequential_passes,
             'include_sequential_variants': args.include_sequential_variants,
             'langevin_reference': not args.no_langevin_reference,
+            'prototype_samples': args.prototype_samples,
+            'prototype_k': args.prototype_k,
+            'prototype_diversity_threshold': args.prototype_diversity_threshold,
+            'prototype_fd_eps': args.prototype_fd_eps,
+            'prototype_tau': args.prototype_tau,
             'feasibility_eps': args.feasibility_eps,
             'plateau_threshold': args.plateau_threshold,
             'seed': args.seed,
             'device': args.device,
         },
+        'prototype_stats': prototype_stats,
         'summary': summary,
         'recommendation': recommendation,
         'trials': trials,
@@ -310,7 +339,7 @@ def maybe_plot_summary(summary: Dict[str, object], output_path: Path) -> Path | 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Constraint composition experiment harness')
-    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'explore'])
+    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'explore'])
     parser.add_argument('--split', type=int, default=3, choices=sorted(DEFAULT_TASKS))
     parser.add_argument('--max-scenes', type=int, default=20)
     parser.add_argument('--min-objects', type=int, default=3)
@@ -327,6 +356,11 @@ def parse_args():
     parser.add_argument('--sequential-passes', type=int, default=2)
     parser.add_argument('--include-sequential-variants', action='store_true')
     parser.add_argument('--no-langevin-reference', action='store_true')
+    parser.add_argument('--prototype-samples', type=int, default=2000)
+    parser.add_argument('--prototype-k', type=int, nargs='+', default=[5, 10, 20])
+    parser.add_argument('--prototype-tau', type=float, nargs='+', default=[0.01, 0.05, 0.1, 0.5])
+    parser.add_argument('--prototype-diversity-threshold', type=float, default=0.1)
+    parser.add_argument('--prototype-fd-eps', type=float, default=1e-3)
     parser.add_argument('--seed', type=int, default=7)
     parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cpu', 'mps', 'cuda'])
     parser.add_argument('--output', type=str, default=None)
