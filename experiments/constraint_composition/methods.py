@@ -4,12 +4,15 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List
 
 import numpy as np
+import torch
 
 from experiments.constraint_composition.core import (
     SceneSpec,
     total_violation_gradient,
     violated_constraint_records,
 )
+from experiments.constraint_composition.global_energy_model import LearnedGlobalEnergy
+from experiments.constraint_composition.learned_energy_model import LearnedConstraintEnergy
 from experiments.constraint_composition.prototypes import numerical_grad, prototype_energy
 
 
@@ -173,6 +176,71 @@ def make_prototype_energy(step_size: float,
     return Method(name=f'prototype_energy_k{k}_tau{tau_label}', step_fn=step)
 
 
+def learned_energy(scene: SceneSpec,
+                   poses: np.ndarray,
+                   models: Dict[str, LearnedConstraintEnergy]) -> float:
+    from experiments.constraint_composition.core import evaluate_constraints
+    from experiments.constraint_composition.prototypes import extract_invariant_features
+
+    total = 0.0
+    for record in evaluate_constraints(scene, poses):
+        bundle = models.get(record.constraint_type)
+        if bundle is None:
+            continue
+        z = extract_invariant_features(poses, record).astype(np.float32)
+        z_norm = (z - bundle.mean) / bundle.std
+        z_tensor = torch.tensor(z_norm, dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            energy = torch.relu(bundle.model(z_tensor)).squeeze(0)
+        total += float(energy.item())
+    return float(total)
+
+
+def make_learned_energy(step_size: float,
+                        models: Dict[str, LearnedConstraintEnergy],
+                        fd_eps: float = 1e-3) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        grad = numerical_grad(
+            poses,
+            lambda x: learned_energy(scene, scene.clamp(x), models),
+            eps=fd_eps,
+        )
+        update = -step_size * grad
+        update[scene.mask] = 0.0
+        return update
+
+    return Method(name='learned_energy', step_fn=step)
+
+
+def global_energy(scene: SceneSpec, poses: np.ndarray, bundle: LearnedGlobalEnergy) -> float:
+    from experiments.constraint_composition.global_features import extract_global_features
+
+    phi = extract_global_features(poses, scene, max_nodes=bundle.max_nodes).astype(np.float32)
+    phi_norm = (phi - bundle.mean) / bundle.std
+    if np.isnan(phi_norm).any():
+        raise ValueError('NaNs detected in normalized global features during inference.')
+    x_tensor = torch.tensor(phi_norm, dtype=torch.float32).unsqueeze(0)
+    with torch.no_grad():
+        energy = torch.relu(bundle.model(x_tensor)).squeeze(0)
+    return float(energy.item())
+
+
+def make_global_energy(step_size: float,
+                       bundle: LearnedGlobalEnergy,
+                       fd_eps: float = 1e-3) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        grad = numerical_grad(
+            poses,
+            lambda x: global_energy(scene, scene.clamp(x), bundle),
+            eps=fd_eps,
+        )
+        update = -step_size * grad
+        update[scene.mask] = 0.0
+        return update
+
+    return Method(name='global_energy', step_fn=step)
+
+
 def make_sequential_projection(step_size: float, ordering: str = 'descending', passes: int = 2) -> Method:
     def step(scene: SceneSpec, poses: np.ndarray, rng: np.random.Generator | None = None, **_: object) -> np.ndarray:
         state = poses.copy()
@@ -275,3 +343,27 @@ def prototype_methods(step_size: float,
                 )
             )
     return methods
+
+
+def learned_energy_methods(step_size: float,
+                           models: Dict[str, LearnedConstraintEnergy],
+                           fd_eps: float = 1e-3,
+                           alpha: float = 1.0,
+                           projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_learned_energy(step_size=step_size, models=models, fd_eps=fd_eps),
+    ]
+
+
+def global_energy_methods(step_size: float,
+                          bundle: LearnedGlobalEnergy,
+                          fd_eps: float = 1e-3,
+                          alpha: float = 1.0,
+                          projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_global_energy(step_size=step_size, bundle=bundle, fd_eps=fd_eps),
+    ]

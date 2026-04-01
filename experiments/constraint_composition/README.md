@@ -30,3 +30,21 @@ python -m experiments.constraint_composition.runner \
   --prototype-k 5 10 20 \
   --prototype-tau 0.01 0.05 0.1 0.5
 ```
+
+Learned energy:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite learned \
+  --max-scenes 20 \
+  --steps 40
+```
+
+Global learned energy:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite global \
+  --max-scenes 20 \
+  --steps 40
+```

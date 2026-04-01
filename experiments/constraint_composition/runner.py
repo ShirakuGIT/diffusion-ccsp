@@ -17,10 +17,16 @@ from networks.denoise_fn import qualitative_constraints
 from experiments.constraint_composition.core import scene_from_data
 from experiments.constraint_composition.methods import (
     exploratory_methods,
+    global_energy_methods,
+    learned_energy_methods,
     langevin_methods,
     projection_methods,
     prototype_methods,
 )
+from experiments.constraint_composition.global_energy_dataset import build_global_dataset
+from experiments.constraint_composition.global_energy_model import train_global_energy_model
+from experiments.constraint_composition.learned_energy_dataset import build_constraint_dataset
+from experiments.constraint_composition.learned_energy_model import train_constraint_models
 from experiments.constraint_composition.metrics import aggregate_method_runs, evaluate_trajectory
 from experiments.constraint_composition.prototypes import build_prototypes
 
@@ -104,6 +110,67 @@ def select_methods(args, scenes):
             projection_passes=args.projection_passes,
         )
         return methods, prototype_stats
+    if args.suite == 'learned':
+        constraint_dataset = build_constraint_dataset(
+            scenes,
+            num_samples=args.learned_dataset_samples,
+            seed=args.learned_seed,
+        )
+        models, train_stats = train_constraint_models(
+            constraint_dataset,
+            epochs=args.learned_epochs,
+            batch_size=args.learned_batch_size,
+            lr=args.learned_lr,
+            seed=args.learned_seed,
+            device='cpu',
+        )
+        methods = learned_energy_methods(
+            step_size=args.step_size,
+            models=models,
+            fd_eps=args.learned_fd_eps,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'dataset_samples': int(args.learned_dataset_samples),
+            'epochs': int(args.learned_epochs),
+            'batch_size': int(args.learned_batch_size),
+            'lr': float(args.learned_lr),
+            'seed': int(args.learned_seed),
+            'constraint_stats': train_stats,
+        }
+    if args.suite == 'global':
+        x_arr, y_arr = build_global_dataset(
+            scenes,
+            num_samples=args.global_dataset_samples,
+            seed=args.global_seed,
+            max_nodes=args.max_objects,
+        )
+        bundle, train_stats = train_global_energy_model(
+            x_arr,
+            y_arr,
+            epochs=args.global_epochs,
+            batch_size=args.global_batch_size,
+            lr=args.global_lr,
+            seed=args.global_seed,
+            device='cpu',
+            max_nodes=args.max_objects,
+        )
+        methods = global_energy_methods(
+            step_size=args.step_size,
+            bundle=bundle,
+            fd_eps=args.global_fd_eps,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'dataset_samples': int(args.global_dataset_samples),
+            'epochs': int(args.global_epochs),
+            'batch_size': int(args.global_batch_size),
+            'lr': float(args.global_lr),
+            'seed': int(args.global_seed),
+            'train_stats': train_stats,
+        }
     return exploratory_methods(step_size=args.step_size), None
 
 
@@ -216,7 +283,7 @@ def run_experiment(args) -> Dict[str, object]:
             f'No scenes matched object-count filter {args.min_objects}-{args.max_objects} '
             f'for task {task_name}.'
         )
-    methods, prototype_stats = select_methods(args, scenes)
+    methods, aux_stats = select_methods(args, scenes)
 
     results: Dict[str, List[Dict[str, object]]] = defaultdict(list)
     trials = []
@@ -280,12 +347,24 @@ def run_experiment(args) -> Dict[str, object]:
             'prototype_diversity_threshold': args.prototype_diversity_threshold,
             'prototype_fd_eps': args.prototype_fd_eps,
             'prototype_tau': args.prototype_tau,
+            'learned_dataset_samples': args.learned_dataset_samples,
+            'learned_epochs': args.learned_epochs,
+            'learned_batch_size': args.learned_batch_size,
+            'learned_lr': args.learned_lr,
+            'learned_fd_eps': args.learned_fd_eps,
+            'learned_seed': args.learned_seed,
+            'global_dataset_samples': args.global_dataset_samples,
+            'global_epochs': args.global_epochs,
+            'global_batch_size': args.global_batch_size,
+            'global_lr': args.global_lr,
+            'global_fd_eps': args.global_fd_eps,
+            'global_seed': args.global_seed,
             'feasibility_eps': args.feasibility_eps,
             'plateau_threshold': args.plateau_threshold,
             'seed': args.seed,
             'device': args.device,
         },
-        'prototype_stats': prototype_stats,
+        'aux_stats': aux_stats,
         'summary': summary,
         'recommendation': recommendation,
         'trials': trials,
@@ -339,7 +418,7 @@ def maybe_plot_summary(summary: Dict[str, object], output_path: Path) -> Path | 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Constraint composition experiment harness')
-    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'explore'])
+    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'explore'])
     parser.add_argument('--split', type=int, default=3, choices=sorted(DEFAULT_TASKS))
     parser.add_argument('--max-scenes', type=int, default=20)
     parser.add_argument('--min-objects', type=int, default=3)
@@ -361,6 +440,18 @@ def parse_args():
     parser.add_argument('--prototype-tau', type=float, nargs='+', default=[0.01, 0.05, 0.1, 0.5])
     parser.add_argument('--prototype-diversity-threshold', type=float, default=0.1)
     parser.add_argument('--prototype-fd-eps', type=float, default=1e-3)
+    parser.add_argument('--learned-dataset-samples', type=int, default=5000)
+    parser.add_argument('--learned-epochs', type=int, default=10)
+    parser.add_argument('--learned-batch-size', type=int, default=128)
+    parser.add_argument('--learned-lr', type=float, default=1e-3)
+    parser.add_argument('--learned-fd-eps', type=float, default=1e-3)
+    parser.add_argument('--learned-seed', type=int, default=0)
+    parser.add_argument('--global-dataset-samples', type=int, default=5000)
+    parser.add_argument('--global-epochs', type=int, default=10)
+    parser.add_argument('--global-batch-size', type=int, default=128)
+    parser.add_argument('--global-lr', type=float, default=1e-3)
+    parser.add_argument('--global-fd-eps', type=float, default=1e-3)
+    parser.add_argument('--global-seed', type=int, default=0)
     parser.add_argument('--seed', type=int, default=7)
     parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cpu', 'mps', 'cuda'])
     parser.add_argument('--output', type=str, default=None)
