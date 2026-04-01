@@ -9,7 +9,7 @@ from trimesh.viewer import windowed
 from trimesh.creation import box, cylinder, axis
 from trimesh.transformations import translation_matrix as T, rotation_matrix as R
 
-from config import *
+from simulation.envs.config import *
 
 """ project configurations """
 
@@ -59,7 +59,7 @@ COLOR_NAMES.update({tuple(DARKER_COLORS[i][:3]): DARKER_COLOR_NAMES[i] for i in 
 COLOR_NAMES.update({tuple(CLASSIC_COLORS[i][:3]): CLASSIC_COLOR_NAMES[i] for i in range(len(CLASSIC_COLORS))})
 
 AABB = namedtuple('AABB', ['lower', 'upper'])
-PANDA_GRIPPER_MESH_PATH = abspath(join(dirname(dirname(__file__)), 'packing_models',
+PANDA_GRIPPER_MESH_PATH = abspath(join(dirname(dirname(dirname(__file__))), 'packing_models',
                                        'models', 'franka_description', 'hand.ply'))
 
 
@@ -201,7 +201,7 @@ def test_tray_scene(show=False, save=True, orthographic=True):
     if show:
         scene.show()
     if save:
-        from render_utils import show_and_save
+        from simulation.envs.render_utils import show_and_save
         show_and_save(scene, img_name='tray_scene.png')
     return scene
 

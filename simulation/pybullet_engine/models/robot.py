@@ -17,8 +17,8 @@ from typing import Optional, Union, Iterable, Tuple, List, Dict, Callable
 
 from jacinle.logging import get_logger
 from jacinle.utils.enum import JacEnum
-from pybullet_engine.client import BulletClient
-from pybullet_engine.models.base import BulletModel
+from simulation.pybullet_engine.client import BulletClient
+from simulation.pybullet_engine.models.base import BulletModel
 
 logger = get_logger(__file__)
 

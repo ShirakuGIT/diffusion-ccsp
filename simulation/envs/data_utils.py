@@ -171,9 +171,9 @@ def world_from_pt(pt_path, world_name='ShapeSettingWorld'):
 
 
 def constraint_from_edge_attr(edge_attr, edge_index, composed_inference=False):
-    from denoise_fn import qualitative_constraints
+    from networks.denoise_fn import qualitative_constraints
     if composed_inference:
-        from denoise_fn import robot_qualitative_constraints as qualitative_constraints
+        from networks.denoise_fn import robot_qualitative_constraints as qualitative_constraints
     constraints = []
     for i in range(len(edge_attr)):
         typ = int(edge_attr[i].detach().cpu().numpy().item())
@@ -197,7 +197,7 @@ def world_from_graph(nodes, world_name='ShapeSettingWorld', **kwargs):
             node = [type_flag_1, type_flag_1, width, length, _, _] & [_, _, _, _, x, y]
             y = [(type)x3, width, length, x, y]
     """
-    from worlds import get_world_class
+    from simulation.envs.worlds import get_world_class
 
     if isinstance(nodes, torch.Tensor):
         nodes = nodes.detach().cpu().numpy()
@@ -613,7 +613,7 @@ def compute_qualitative_constraints(objects, rotations=None, debug=False, scale=
             constraints.remove(('bottom-in', x, 0))
             constraints.remove(('top-in', x, 0))
 
-    from denoise_fn import ignored_constraints
+    from networks.denoise_fn import ignored_constraints
     constraints = [c for c in constraints if c[0] not in ignored_constraints]
     # print()
     if debug:
@@ -650,7 +650,7 @@ def translate_cfree_evaluations(evaluations):
 
 
 def verify_triangles_encoding_decoding():
-    render_dir = abspath(join(dirname(__file__), '..', 'renders', 'triangles_encoding_decoding_2'))
+    render_dir = abspath(join(dirname(__file__), '..', '..', 'renders', 'triangles_encoding_decoding_2'))
     if not isdir(render_dir):
         os.makedirs(render_dir)
     num = 12
@@ -679,7 +679,7 @@ def get_ont_hot_grasp_side(grasp_side):
 
 
 def get_grasp_db():
-    grasp_file = join(dirname(__file__), '..', 'packing_models', 'grasps', 'hand_grasps_PandaRobot.json')
+    grasp_file = join(dirname(__file__), '..', '..', 'packing_models', 'grasps', 'hand_grasps_PandaRobot.json')
     return json.load(open(grasp_file, 'r'))
 
 

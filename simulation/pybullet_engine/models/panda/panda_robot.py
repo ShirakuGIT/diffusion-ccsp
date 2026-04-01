@@ -17,16 +17,16 @@ from typing import Any, Optional, Union, Iterable, Tuple, Dict
 import jacinle
 from jacinle.logging import get_logger
 
-from pybullet_engine.algorithms.space import BoxConfigurationSpace, CollisionFreeProblemSpace
-from pybullet_engine.algorithms.rrt import birrt
-from pybullet_engine.range_utils import Range
-from pybullet_engine.interpolation_utils import gen_cubic_spline, get_next_target_cubic_spline
-from pybullet_engine.interpolation_utils import gen_linear_spline, get_next_target_linear_spline
+from simulation.pybullet_engine.algorithms.space import BoxConfigurationSpace, CollisionFreeProblemSpace
+from simulation.pybullet_engine.algorithms.rrt import birrt
+from simulation.pybullet_engine.range_utils import Range
+from simulation.pybullet_engine.interpolation_utils import gen_cubic_spline, get_next_target_cubic_spline
+from simulation.pybullet_engine.interpolation_utils import gen_linear_spline, get_next_target_linear_spline
 
-from pybullet_engine.client import BulletClient
-from pybullet_engine.world import BodyFullStateSaver, ConstraintInfo
-from pybullet_engine.models.robot import Robot, GripperObjectIndices, RobotActionPrimitive
-from pybullet_engine.rotation_utils import rotate_vector, quat_mul, quat_conjugate
+from simulation.pybullet_engine.client import BulletClient
+from simulation.pybullet_engine.world import BodyFullStateSaver, ConstraintInfo
+from simulation.pybullet_engine.models.robot import Robot, GripperObjectIndices, RobotActionPrimitive
+from simulation.pybullet_engine.rotation_utils import rotate_vector, quat_mul, quat_conjugate
 
 logger = get_logger(__file__)
 
@@ -222,8 +222,8 @@ class PandaRobot(Robot):
 
     def _init_ikfast(self):
         if self.ik_fast_wrapper is None:
-            from pybullet_engine.ikfast.ikfast_common import IKFastWrapper
-            import pybullet_engine.ikfast.franka_panda.ikfast_panda_arm as ikfast_module
+            from simulation.pybullet_engine.ikfast.ikfast_common import IKFastWrapper
+            import simulation.pybullet_engine.ikfast.franka_panda.ikfast_panda_arm as ikfast_module
             self.ik_fast_wrapper = IKFastWrapper(
                 self.world, ikfast_module,
                 body_id=self.panda,

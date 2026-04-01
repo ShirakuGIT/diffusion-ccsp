@@ -3,10 +3,10 @@ import json
 import numpy as np
 from os.path import join, abspath, isdir, isfile, basename, dirname
 from os import listdir
-from config import RENDER_PATH, DATASET_PATH
+from simulation.envs.config import RENDER_PATH, DATASET_PATH
 from collections import defaultdict
 
-from mesh_utils import RAINBOW_COLOR_NAMES
+from simulation.envs.mesh_utils import RAINBOW_COLOR_NAMES
 
 #########################################################################
 

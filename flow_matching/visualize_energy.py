@@ -23,13 +23,13 @@ from einops import rearrange, repeat
 from tqdm import tqdm
 
 from train_utils import load_trainer
-from data_utils import render_world_from_graph
-from denoise_fn import qualitative_constraints, puzzle_constraints
-from datasets import visualize_qualitative_distribution
+from simulation.envs.data_utils import render_world_from_graph
+from networks.denoise_fn import qualitative_constraints, puzzle_constraints
+from flow_matching.datasets import visualize_qualitative_distribution
 
-DATA_PATH = abspath(join(dirname(__file__), 'data'))
-RENDER_PATH = abspath(join(dirname(__file__), 'renders'))
-VISUALIZATION_PATH = abspath(join(dirname(__file__), 'visualizations'))
+DATA_PATH = abspath(join(dirname(__file__), '..', 'data'))
+RENDER_PATH = abspath(join(dirname(__file__), '..', 'renders'))
+VISUALIZATION_PATH = abspath(join(dirname(__file__), '..', 'visualizations'))
 OUTPUT_PATH = join(VISUALIZATION_PATH, 'energy_fields')
 if not isdir(OUTPUT_PATH):
     os.mkdir(OUTPUT_PATH)
@@ -234,7 +234,7 @@ def make_gradient_energy_field(X, Y, Z, V, title, use_toy_data=True, **kwargs):
 
 def read_imgs(img_files, mp4=False):
     from PIL import Image
-    from mesh_utils import GREEN
+    from simulation.envs.mesh_utils import GREEN
 
     frames = []
     for i, img in enumerate(img_files):
@@ -466,7 +466,7 @@ def make_energy_fn(x, y, denoise_fn, trainer, c_idx, geoms_emb, time_emb,
 
 def get_test_data_from_pt(data_pt, var):
     import torch
-    from data_transforms import pre_transform
+    from networks.data_transforms import pre_transform
     data = torch.load(data_pt)
     data = pre_transform(data, 0, 'qualitative')[0]
     geoms_in = data.x[:, :2]
@@ -477,7 +477,7 @@ def get_test_data_from_pt(data_pt, var):
 
 def plot_diffusion_by_pt(run_id, milestone, data_pt, key, con_pair, t=0, save_png=False, render_history=False, **kwargs):
     import torch
-    from data_utils import render_world_from_graph, constraint_from_edge_attr
+    from simulation.envs.data_utils import render_world_from_graph, constraint_from_edge_attr
 
     data, geoms_in, world_name = get_test_data_from_pt(data_pt, con_pair[0][1])
 

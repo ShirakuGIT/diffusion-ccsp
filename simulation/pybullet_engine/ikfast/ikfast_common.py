@@ -16,9 +16,9 @@ import random
 import numpy as np
 import numpy.random as npr
 from jacinle.logging import get_logger
-from pybullet_engine.rotationlib import mat2quat, quat2mat
-from pybullet_engine.world import BulletWorld
-from pybullet_engine.rotation_utils import quat_conjugate, quat_mul
+from simulation.pybullet_engine.rotationlib import mat2quat, quat2mat
+from simulation.pybullet_engine.world import BulletWorld
+from simulation.pybullet_engine.rotation_utils import quat_conjugate, quat_mul
 
 # TODO: lookup robot & tool in dictionary and use if exists
 

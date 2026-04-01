@@ -34,12 +34,10 @@ import torch.nn.functional as F
 from torch.optim import Adam
 from torch_geometric.loader import DataLoader
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'envs'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'networks'))
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
-from train_flow import (FlowMatchingCCSP, FlowTrainer, get_data_config,
+from flow_matching.train_flow import (FlowMatchingCCSP, FlowTrainer, get_data_config,
                         _sample_flow_simple, _fast_constraint_check)
 
 

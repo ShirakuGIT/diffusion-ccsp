@@ -1,4 +1,4 @@
-from config import *
+from simulation.envs.config import *
 import numpy as np
 import trimesh
 from trimesh.transformations import rotation_matrix as R

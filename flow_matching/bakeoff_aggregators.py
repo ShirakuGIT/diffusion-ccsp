@@ -25,17 +25,15 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'envs'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'networks'))
 
 from torch_geometric.loader import DataLoader
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
 from networks.denoise_fn import qualitative_constraints
 
-from train_flow import FlowMatchingCCSP, get_data_config, _sample_flow_simple
-from fix_and_eval import check_constraints, sample_flow_fixed
+from flow_matching.train_flow import FlowMatchingCCSP, get_data_config, _sample_flow_simple
+from flow_matching.fix_and_eval import check_constraints, sample_flow_fixed
 
 
 def train_model(aggregator, dims, constraint_types, train_dataset,

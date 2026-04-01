@@ -15,10 +15,10 @@ import pybullet as p
 import jacinle
 
 from typing import Optional, Tuple, Union
-from pybullet_engine.client import BulletClient
-from pybullet_engine.models.robot import Robot, Gripper, GripperObjectIndices, RobotActionPrimitive
-from pybullet_engine.models.ur5.ur5_gripper import UR5GripperType
-from pybullet_engine.rotation_utils import compose_transformation
+from simulation.pybullet_engine.client import BulletClient
+from simulation.pybullet_engine.models.robot import Robot, Gripper, GripperObjectIndices, RobotActionPrimitive
+from simulation.pybullet_engine.models.ur5.ur5_gripper import UR5GripperType
+from simulation.pybullet_engine.rotation_utils import compose_transformation
 
 __all__ = ['UR5Robot', 'UR5ReachAndPick', 'UR5ReachAndPlace', 'UR5PlanarMove']
 

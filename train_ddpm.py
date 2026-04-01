@@ -7,8 +7,8 @@ import os
 from os.path import join, isdir
 import argparse
 
-from datasets import GraphDataset
-from data_transforms import pre_transform
+from flow_matching.datasets import GraphDataset
+from networks.data_transforms import pre_transform
 from train_utils import create_trainer, get_args
 
 if not isdir('data'):

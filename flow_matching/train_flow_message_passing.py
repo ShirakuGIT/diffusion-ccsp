@@ -20,16 +20,12 @@ os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
 import torch
 from torch_geometric.loader import DataLoader
 
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / 'envs'))
-sys.path.insert(0, str(ROOT / 'networks'))
-sys.path.insert(0, str(ROOT.parent / 'Jacinle'))
+ROOT = Path(__file__).resolve().parent.parent
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
-from train_flow import FlowTrainer, get_best_device, get_data_config
-from flow_message_passing import MessagePassingFlowMatchingCCSP
+from flow_matching.train_flow import FlowTrainer, get_best_device, get_data_config
+from flow_matching.flow_message_passing import MessagePassingFlowMatchingCCSP
 
 
 def validate_dataset_dir(task_name):

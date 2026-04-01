@@ -13,7 +13,7 @@ import pybullet as p
 from os.path import join, dirname, abspath, isfile
 import json
 
-from demo_utils import demo_runner, DATASET_PATH, MODELS_DIR, unit_quat, get_initial_poses, \
+from simulation.demo_utils import demo_runner, DATASET_PATH, MODELS_DIR, unit_quat, get_initial_poses, \
     get_tiles, triangle_generator
 
 

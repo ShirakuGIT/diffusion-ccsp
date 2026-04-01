@@ -1,8 +1,8 @@
 from os.path import dirname, join
 import matplotlib.pyplot as plt
 
-from worlds import *
-from robot_worlds import *
+from simulation.envs.worlds import *
+from simulation.envs.robot_worlds import *
 from collections import defaultdict
 from tqdm import tqdm
 
@@ -13,7 +13,7 @@ random.seed(seed)
 np.random.seed(seed % (2**32))
 print('Seed:', seed)
 
-RENDER_PATH = join(dirname(__file__), '..', 'renders')
+RENDER_PATH = join(dirname(__file__), '..', '..', 'renders')
 if not isdir(RENDER_PATH):
     os.mkdir(RENDER_PATH)
 
@@ -138,7 +138,7 @@ def test_qualitative_world():
 
 def visualize_qualitative_constraints(num_samples=10000, file_type='pdf'):
     """ t, bw, bl, x, y, yaw = nodes[i] """
-    from denoise_fn import qualitative_constraints
+    from networks.denoise_fn import qualitative_constraints
     from data_monitor import RED, BLUE
     from matplotlib.collections import PatchCollection
     from matplotlib.patches import Rectangle

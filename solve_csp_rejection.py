@@ -1,5 +1,5 @@
 from os.path import join
-from demo_utils import run_rejection_sampling_baseline, rejection_sample_given_solution_json
+from simulation.demo_utils import run_rejection_sampling_baseline, rejection_sample_given_solution_json
 
 
 def rejection_sampling_fn_triangular(solution_json, prediction_json, **kwargs):

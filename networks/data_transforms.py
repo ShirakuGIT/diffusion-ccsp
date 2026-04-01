@@ -3,9 +3,9 @@ from torch_geometric.data import Data
 import numpy as np
 from os.path import join, isfile
 
-from data_utils import print_tensor, get_one_hot, r, get_grasp_side_from_grasp, \
+from simulation.envs.data_utils import print_tensor, get_one_hot, r, get_grasp_side_from_grasp, \
     get_ont_hot_grasp_side
-from denoise_fn import robot_constraints, puzzle_constraints, \
+from networks.denoise_fn import robot_constraints, puzzle_constraints, \
     stability_constraints, qualitative_constraints, robot_qualitative_constraints
 
 
@@ -391,7 +391,7 @@ def draw_constraint_network_df_batch(features, edge_index, edge_attr, conditione
 def draw_constraint_network_df(features, constraints, conditioned_variables, nodes_info, con_labels,
                                evaluations=None, name=f"cn", dir_name='', save_png=True):
     import graphviz
-    from denoise_fn import puzzle_constraints
+    from networks.denoise_fn import puzzle_constraints
 
     def n(inputs):
         if isinstance(inputs, torch.Tensor):
@@ -656,7 +656,7 @@ def draw_constraint_network(nodes_info, nodes, edge_index, edge_labels, predicti
 
 def draw_cn_while_training(dataset, epoch, render_dir, count_limit=100):
     from torch_geometric.data import Data
-    from data_transforms import draw_constraint_network
+    from networks.data_transforms import draw_constraint_network
     from tqdm import tqdm
     count = 0
     for data, logits, y_prediction, mask in tqdm(dataset, desc='generating var-con graphs'):

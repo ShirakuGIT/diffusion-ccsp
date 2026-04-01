@@ -24,7 +24,7 @@ import numpy as np
 from tqdm import tqdm
 
 
-from data_utils import render_world_from_graph, print_tensor, constraint_from_edge_attr, translate_cfree_evaluations
+from simulation.envs.data_utils import render_world_from_graph, print_tensor, constraint_from_edge_attr, translate_cfree_evaluations
 
 try:
     from apex import amp
@@ -559,7 +559,7 @@ class Trainer(object):
                  save_log=False, run_all=False, run_only=False, resume_eval=False, **kwargs):
         if 'robot' in self.input_mode or 'stability' in self.input_mode:
             sys.path.append(dirname(dirname(abspath("__file__"))))
-            from demo_utils import render_robot_world_from_graph, render_stability_world_from_graph
+            from simulation.demo_utils import render_robot_world_from_graph, render_stability_world_from_graph
 
         self.model.eval()
         json_name = join(self.render_dir, f'denoised_t={milestone}.json')
@@ -725,7 +725,7 @@ class Trainer(object):
                                     self.render_success(milestone, i, j, k, batch, history, world_name=self.world_name, **kwargs)
 
                             elif 'qualitative' in self.input_mode:
-                                from denoise_fn import qualitative_constraints
+                                from networks.denoise_fn import qualitative_constraints
                                 if len(evaluations) > 0 and len(evaluations[0]) == 2:
                                     evaluations = translate_cfree_evaluations(evaluations)
                                 else:
@@ -733,7 +733,7 @@ class Trainer(object):
                                 all_failure_modes[k][j] = evaluations
 
                             elif 'diffuse_pairwise' in self.input_mode:
-                                from data_utils import yaw_from_sn_cs
+                                from simulation.envs.data_utils import yaw_from_sn_cs
 
                                 gt = batch.x[torch.where(batch.x_extract == j)]
                                 gt[:, :2] *= world_dims[0]
@@ -844,7 +844,7 @@ class Trainer(object):
 
     def render_success(self, milestone, i, j, k, batch, history, n_frames=50,
                        gif_file=None, save_mp4=False, save_history=True, **kwargs):
-        from mesh_utils import GREEN, RED
+        from simulation.envs.mesh_utils import GREEN, RED
         if gif_file is None:
             gif_file = join(self.render_dir, f'denoised_t={milestone}_n={i}_i={j}_k={k}.gif')
         gif_file = abspath(gif_file)

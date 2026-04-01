@@ -18,9 +18,9 @@ import numpy as np
 import pybullet as p
 
 from jacinle.utils.enum import JacEnum
-from pybullet_engine.client import BulletClient
-from pybullet_engine.models.robot import Gripper, GripperObjectIndices
-from pybullet_engine.rotation_utils import get_ee_to_tool, solve_tool_from_ee
+from simulation.pybullet_engine.client import BulletClient
+from simulation.pybullet_engine.models.robot import Gripper, GripperObjectIndices
+from simulation.pybullet_engine.rotation_utils import get_ee_to_tool, solve_tool_from_ee
 
 
 SPATULA_BASE_URDF = 'ur5/spatula/spatula-base.urdf'

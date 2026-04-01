@@ -7,10 +7,10 @@ from os.path import isfile
 import pybullet_planning as pp
 import open3d as o3d
 
-from pybullet_engine.client import BulletClient
-from pybullet_engine.models.ur5.ur5_robot import UR5Robot
+from simulation.pybullet_engine.client import BulletClient
+from simulation.pybullet_engine.models.ur5.ur5_robot import UR5Robot
 
-from demo_utils import create_robot_workstation, load_packing_object
+from simulation.demo_utils import create_robot_workstation, load_packing_object
 from packing_models.bullet_utils import save_pointcloud_to_ply, set_joint_positions, get_joints, \
     get_aabb, get_grasp_sides, load_floating_gripper, save_grasp_db
 from packing_models.assets import get_model_ids, get_pointcloud_path, load_asset_to_pdsketch, \
@@ -102,7 +102,7 @@ def save_panda_gripper_pointcloud():
     joints = get_joints(c.client_id, body)
     set_joint_positions(c.client_id, body, joints[:2], [0.04] * 2)
 
-    pcd_file = join(dirname(__file__), 'packing_models', 'models', 'franka_description', 'hand.ply')
+    pcd_file = join(dirname(__file__), '..', 'packing_models', 'models', 'franka_description', 'hand.ply')
     save_pointcloud_to_ply(c, body, pcd_file, points_per_geom=400)
 
     # pcd = c.world.get_pointcloud(body, zero_center=True, points_per_geom=400)
@@ -143,4 +143,3 @@ if __name__ == '__main__':
     # demo_save_pointcloud()
     # save_panda_gripper_pointcloud()
     # check_grasp_sides()
-

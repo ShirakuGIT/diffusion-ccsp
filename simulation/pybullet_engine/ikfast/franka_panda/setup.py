@@ -10,7 +10,7 @@
 
 import sys
 from os.path import dirname
-from pybullet_engine.ikfast.compile import compile_ikfast
+from simulation.pybullet_engine.ikfast.compile import compile_ikfast
 
 sys.path.insert(0, dirname(dirname(__file__)))
 sys.argv[:] = sys.argv[:1] + ['build']

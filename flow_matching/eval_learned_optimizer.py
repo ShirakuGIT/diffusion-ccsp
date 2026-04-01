@@ -18,15 +18,13 @@ import torch
 from torch_geometric.loader import DataLoader
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT / 'envs'))
-sys.path.insert(0, str(ROOT / 'networks'))
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
-from fix_and_eval import check_constraints
+from flow_matching.fix_and_eval import check_constraints
 from models.learned_optimizer import LearnedOptimizer, solve
-from train_flow_v3 import compute_constraint_violations, get_data_config
-from train_learned_optimizer import get_pose_dim, initialize_poses, maybe_project_to_tray
+from flow_matching.train_flow_v3 import compute_constraint_violations, get_data_config
+from flow_matching.train_learned_optimizer import get_pose_dim, initialize_poses, maybe_project_to_tray
 from train_utils import load_trainer
 
 

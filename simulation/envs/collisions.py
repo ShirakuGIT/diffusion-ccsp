@@ -131,7 +131,7 @@ def check_collisions_in_scene(objects, rotations=None, **kwargs):
 
 
 def test_check_collisions_in_scene():
-    from worlds import ShapeSettingWorld
+    from simulation.envs.worlds import ShapeSettingWorld
 
     world = ShapeSettingWorld()
     world.sample_scene()

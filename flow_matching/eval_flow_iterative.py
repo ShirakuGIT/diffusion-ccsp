@@ -25,17 +25,13 @@ import numpy as np
 import torch
 from torch_geometric.loader import DataLoader
 
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / 'envs'))
-sys.path.insert(0, str(ROOT / 'networks'))
-sys.path.insert(0, str(ROOT.parent / 'Jacinle'))
+ROOT = Path(__file__).resolve().parent.parent
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
-from fix_and_eval import clamp_to_tray, check_constraints
-from train_flow import FlowMatchingCCSP, get_best_device, get_data_config
-from flow_message_passing import MessagePassingFlowMatchingCCSP
+from flow_matching.fix_and_eval import clamp_to_tray, check_constraints
+from flow_matching.train_flow import FlowMatchingCCSP, get_best_device, get_data_config
+from flow_matching.flow_message_passing import MessagePassingFlowMatchingCCSP
 
 
 def validate_dataset_dir(task_name):

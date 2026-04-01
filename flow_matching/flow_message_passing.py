@@ -5,12 +5,8 @@ import torch
 import torch.nn as nn
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / 'envs'))
-sys.path.insert(0, str(ROOT / 'networks'))
-sys.path.insert(0, str(ROOT.parent / 'Jacinle'))
 
-from train_flow import FlowMatchingCCSP
+from flow_matching.train_flow import FlowMatchingCCSP
 
 
 class MessagePassingFlowMatchingCCSP(FlowMatchingCCSP):

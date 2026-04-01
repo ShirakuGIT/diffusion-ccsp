@@ -42,17 +42,15 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'envs'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'networks'))
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
-from train_flow import FlowMatchingCCSP, get_data_config
-from fix_and_eval import clamp_to_tray, compute_barrier
-from train_fmip import FlowMatchingCCSP_FMIP, _sample_fmip_simple
+from flow_matching.train_flow import FlowMatchingCCSP, get_data_config
+from flow_matching.fix_and_eval import clamp_to_tray, compute_barrier
+from flow_matching.train_fmip import FlowMatchingCCSP_FMIP, _sample_fmip_simple
 
 try:
-    from train_flow_v4 import barrier_violation_loss
+    from flow_matching.train_flow_v4 import barrier_violation_loss
 except ImportError:
     barrier_violation_loss = None
 

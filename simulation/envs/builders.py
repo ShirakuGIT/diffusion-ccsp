@@ -4,7 +4,7 @@ import numpy as np
 from math import sqrt
 import random
 
-from data_utils import compute_qualitative_constraints, summarize_constraints, r as rd
+from simulation.envs.data_utils import compute_qualitative_constraints, summarize_constraints, r as rd
 
 
 def get_tray_splitting_gen(num_samples=40, min_num_regions=2, max_num_regions=6, max_depth=3, default_min_size=0.4):

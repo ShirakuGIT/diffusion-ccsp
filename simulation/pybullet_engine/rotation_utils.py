@@ -10,10 +10,10 @@
 
 import numpy as np
 from typing import Tuple, TYPE_CHECKING
-from pybullet_engine.rotationlib import euler2quat
+from simulation.pybullet_engine.rotationlib import euler2quat
 
 if TYPE_CHECKING:
-    from pybullet_engine.client import BulletClient
+    from simulation.pybullet_engine.client import BulletClient
 
 
 # For testing whether a number is close to zero
@@ -298,7 +298,7 @@ def get_ee_to_tool(client: 'BulletClient', robot_id, ee_id, tool_id: int) -> Tup
     # if robot.gripper_constraint is not None:
     #     constraint = robot.world.get_constraint(robot.gripper_constraint)
     #     assert constraint.child_body == tool_id
-    #     from pybullet_engine.rotation_utils import quat_conjugate
+    #     from simulation.pybullet_engine.rotation_utils import quat_conjugate
     #     return -np.array(constraint.parent_frame_pos), quat_conjugate(np.array(constraint.parent_frame_orn))
 
     robot_pos, robot_quat = client.world.get_link_state_by_id(robot_id, ee_id, fk=True).get_transformation()

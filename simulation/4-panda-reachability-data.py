@@ -10,7 +10,7 @@ import pybullet_planning as pp
 
 from packing_models.assets import CATEGORIES_DIFFUSION_CSP, get_model_ids
 from packing_models.bullet_utils import get_reachability_file
-from demo_utils import create_robot_workstation
+from simulation.demo_utils import create_robot_workstation
 
 
 def sample_ik_solvable_pose(num_samples=500, num_scales=10, use_rrt=False, correction_mode=True):

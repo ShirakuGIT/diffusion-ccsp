@@ -12,7 +12,7 @@ import numpy as np
 import numpy.random as npr
 
 from typing import Optional, Tuple, List
-from pybullet_engine.algorithms.space import ProblemSpace
+from simulation.pybullet_engine.algorithms.space import ProblemSpace
 
 __all__ = ['RRTNode', 'RRT', 'smooth_path', 'get_smooth_path', 'optimize_path', 'rrt', 'birrt']
 

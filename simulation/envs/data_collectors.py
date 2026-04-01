@@ -7,10 +7,10 @@ import json
 import sys
 from tqdm import tqdm
 import math
-from config import *
-from worlds import TrayWorld, ShapeSettingWorld, RandomSplitWorld, get_world_class
-from render_utils import *
-from data_utils import world_from_pt
+from simulation.envs.config import *
+from simulation.envs.worlds import TrayWorld, ShapeSettingWorld, RandomSplitWorld, get_world_class
+from simulation.envs.render_utils import *
+from simulation.envs.data_utils import world_from_pt
 import argparse
 from collections import defaultdict
 

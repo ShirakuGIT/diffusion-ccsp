@@ -36,7 +36,7 @@ Project page: [Diffusion-CCSP](https://diffusion-ccsp.github.io/)
 * Compile IK for Franka Panda if want to collect and test robot planning.
 
     ```shell
-    (cd pybullet_engine/ikfast/franka_panda; python setup.py)
+    (cd simulation/pybullet_engine/ikfast/franka_panda; python setup.py)
     ```
 
 ## Download data and pre-trained models
@@ -60,8 +60,8 @@ python solve_csp.py
 Generate data into `data/` folder
 
 ```shell
-python envs/data_collectors.py -world_name 'RandomSplitQualitativeWorld' -data_type 'train' -num_worlds 100
-python envs/data_collectors.py -world_name 'RandomSplitQualitativeWorld' -data_type 'test' -num_worlds 10 -pngs -jsons
+python simulation/envs/data_collectors.py -world_name 'RandomSplitQualitativeWorld' -data_type 'train' -num_worlds 100
+python simulation/envs/data_collectors.py -world_name 'RandomSplitQualitativeWorld' -data_type 'test' -num_worlds 10 -pngs -jsons
 ```
 
 <details><summary>Some frequently used flags</summary>
@@ -76,10 +76,10 @@ python envs/data_collectors.py -world_name 'RandomSplitQualitativeWorld' -data_t
 
 ```shell
 ## task 4: packing 3D objects
-python 3-panda-box-data.py
+python simulation/3-panda-box-data.py
 
 ## task 3: stacking shapes
-python 5-panda-stability-data.py
+python simulation/5-panda-stability-data.py
 ```
 
 

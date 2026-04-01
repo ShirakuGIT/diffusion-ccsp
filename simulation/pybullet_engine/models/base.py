@@ -8,7 +8,7 @@
 # This file is part of HACL-PyTorch.
 # Distributed under terms of the MIT license.
 
-from pybullet_engine.client import BulletClient
+from simulation.pybullet_engine.client import BulletClient
 
 
 class BulletModel(object):

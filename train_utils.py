@@ -8,11 +8,11 @@ from pprint import pprint
 # sys.path.append(join(dirname(abspath(__file__)), 'envs'))
 
 from torch_geometric.loader import DataLoader
-from datasets import GraphDataset, RENDER_PATH
+from flow_matching.datasets import GraphDataset, RENDER_PATH
 from networks.ddpm import Trainer, GaussianDiffusion
 from networks.denoise_fn import ConstraintDiffuser, ComposedEBMDenoiseFn
-from data_transforms import pre_transform
-from data_utils import print_tensor
+from networks.data_transforms import pre_transform
+from simulation.envs.data_utils import print_tensor
 
 
 def wandb_init(config, project_name='grid_offset_mp4'):

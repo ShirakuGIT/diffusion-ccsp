@@ -21,15 +21,13 @@ from torch.optim import Adam
 from torch_geometric.loader import DataLoader
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT / 'envs'))
-sys.path.insert(0, str(ROOT / 'networks'))
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
 from networks.denoise_fn import qualitative_constraints
-from fix_and_eval import clamp_to_tray
+from flow_matching.fix_and_eval import clamp_to_tray
 from models.learned_optimizer import LearnedOptimizer, apply_fixed_poses, solve
-from train_flow_v3 import compute_constraint_violations, get_data_config
+from flow_matching.train_flow_v3 import compute_constraint_violations, get_data_config
 
 
 def set_seed(seed):

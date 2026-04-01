@@ -12,7 +12,7 @@ import numpy as np
 
 import pybullet_planning as pp
 
-from demo_utils import demo_runner, get_rainbow_colors, err, load_packing_object
+from simulation.demo_utils import demo_runner, get_rainbow_colors, err, load_packing_object
 from packing_models.assets import get_model_ids, bottom_to_center
 from packing_models.bullet_utils import get_loaded_scale, nice, draw_goal_pose
 

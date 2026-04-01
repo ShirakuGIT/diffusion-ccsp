@@ -15,13 +15,13 @@ import torch
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Dataset, InMemoryDataset, download_url
 
-from data_utils import get_one_hot, print_tensor, render_world_from_graph, constraint_from_edge_attr
-from data_transforms import pre_transform, robot_data_json_to_pt, stability_data_json_to_pt
-from denoise_fn import qualitative_constraints
+from simulation.envs.data_utils import get_one_hot, print_tensor, render_world_from_graph, constraint_from_edge_attr
+from networks.data_transforms import pre_transform, robot_data_json_to_pt, stability_data_json_to_pt
+from networks.denoise_fn import qualitative_constraints
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-PROJECT_PATH = dirname(__file__)
+PROJECT_PATH = abspath(join(dirname(__file__), '..'))
 DATASET_PATH = abspath(join(PROJECT_PATH, 'data'))
 RENDER_PATH = abspath(join(PROJECT_PATH, 'renders'))
 VISUALIZATION_PATH = abspath(join(PROJECT_PATH, 'visualizations'))
@@ -166,12 +166,12 @@ def visualize_dataset(dir_name='RandomSplitWorld(1)_test', input_mode='diffuse_p
 
         if 'robot' in input_mode:
             """ can use `render_world_from_graph()` too but won't be able to check collisions """
-            from demo_utils import render_robot_world_from_graph
+            from simulation.demo_utils import render_robot_world_from_graph
             prediction_json = join(png_dir, f'{y}_prediction.json')
             result = render_robot_world_from_graph(x, prediction_json)
 
         elif 'stability' in input_mode:
-            from demo_utils import render_stability_world_from_graph
+            from simulation.demo_utils import render_stability_world_from_graph
             prediction_json = join(png_dir, f'{y}_prediction.json')
             supports = data.edge_index.T[torch.where(data.edge_attr == 1)].T
             result = render_stability_world_from_graph(x, prediction_json, world_dims, supports)

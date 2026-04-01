@@ -37,7 +37,7 @@ import torch.nn.functional as F
 from torch.optim import Adam
 from torch_geometric.loader import DataLoader
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
 from networks.denoise_fn import (
     qualitative_constraints,
@@ -623,7 +623,7 @@ class FlowTrainer:
 
     @torch.no_grad()
     def _quick_eval(self):
-        from fix_and_eval import check_constraints
+        from flow_matching.fix_and_eval import check_constraints
 
         self.model.eval()
         print(f"\n  [eval @ step {self.step}]")

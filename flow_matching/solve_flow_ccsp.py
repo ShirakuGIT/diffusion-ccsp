@@ -47,9 +47,9 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
-from train_flow import FlowMatchingCCSP, get_data_config
+from flow_matching.train_flow import FlowMatchingCCSP, get_data_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────

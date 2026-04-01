@@ -30,14 +30,12 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'envs'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'networks'))
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
 from networks.denoise_fn import qualitative_constraints
-from train_flow import FlowMatchingCCSP, get_data_config
-from fix_and_eval import clamp_to_tray, compute_barrier
+from flow_matching.train_flow import FlowMatchingCCSP, get_data_config
+from flow_matching.fix_and_eval import clamp_to_tray, compute_barrier
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -21,15 +21,13 @@ from collections import defaultdict
 import torch
 from torch_geometric.loader import DataLoader
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'envs'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'networks'))
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
 from networks.denoise_fn import qualitative_constraints
 
-from train_flow import FlowMatchingCCSP, get_data_config
-from fix_and_eval import clamp_to_tray, check_constraints
+from flow_matching.train_flow import FlowMatchingCCSP, get_data_config
+from flow_matching.fix_and_eval import clamp_to_tray, check_constraints
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -238,8 +236,8 @@ def compare_checkers(model, constraint_types, input_mode='qualitative',
     Compare our barrier-based checker vs diffusion's render_world_from_graph
     on the same flow-generated poses, to verify they agree.
     """
-    from denoise_fn import constraint_from_edge_attr
-    from data_utils import render_world_from_graph
+    from networks.denoise_fn import constraint_from_edge_attr
+    from simulation.envs.data_utils import render_world_from_graph
 
     test_task = "RandomSplitQualitativeWorld(100)_qualitative_test_2_split"
     dataset = GraphDataset(test_task, input_mode=input_mode,

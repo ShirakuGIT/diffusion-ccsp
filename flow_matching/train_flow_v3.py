@@ -33,7 +33,7 @@ import torch.nn.functional as F
 from torch.optim import Adam
 from torch_geometric.loader import DataLoader
 
-from datasets import GraphDataset
+from flow_matching.datasets import GraphDataset
 from networks.data_transforms import pre_transform
 from networks.denoise_fn import (
     qualitative_constraints,
