@@ -23,6 +23,7 @@ from experiments.constraint_composition.methods import (
     graph_score_methods,
     graph_score_plus_priority_methods,
     graph_score_plus_methods,
+    graph_score_two_phase_methods,
     learned_energy_methods,
     langevin_methods,
     projection_methods,
@@ -33,6 +34,7 @@ from experiments.constraint_composition.methods import (
 from experiments.constraint_composition.graph_noise_dataset import build_graph_noise_dataset
 from experiments.constraint_composition.graph_flow_dataset import build_graph_flow_dataset
 from experiments.constraint_composition.graph_score_dataset import build_graph_score_dataset
+from experiments.constraint_composition.graph_refine_dataset import build_graph_refine_dataset
 from experiments.constraint_composition.graph_score_proj_dataset import build_graph_score_proj_dataset
 from experiments.constraint_composition.graph_score_plus_dataset import build_graph_score_plus_dataset
 from experiments.constraint_composition.graph_dagger import train_graph_dagger
@@ -541,6 +543,66 @@ def select_methods(args, scenes):
             'seed': int(args.graph_score_plus_seed),
             'train_stats': train_stats,
         }
+    if args.suite == 'graph_score_two_phase':
+        coarse_dataset = build_graph_score_plus_dataset(
+            scenes,
+            num_samples=args.graph_score_plus_samples,
+            sigma_min=args.graph_score_plus_sigma_min,
+            sigma_max=args.graph_score_plus_sigma_max,
+            fd_eps=args.graph_score_plus_fd_eps,
+            seed=args.graph_score_plus_seed,
+        )
+        coarse_bundle, coarse_train_stats = train_graph_vector_field(
+            coarse_dataset,
+            epochs=args.graph_score_plus_epochs,
+            batch_size=args.graph_score_plus_batch_size,
+            lr=args.graph_score_plus_lr,
+            seed=args.graph_score_plus_seed,
+            device='cpu',
+        )
+        refine_dataset = build_graph_refine_dataset(
+            scenes,
+            coarse_bundle=coarse_bundle,
+            num_trajectories=args.graph_refine_num_trajectories,
+            rollout_steps=args.graph_refine_rollout_steps,
+            switch_threshold=args.graph_refine_switch_threshold,
+            noise_scale=args.graph_refine_noise_scale,
+            step_size=args.step_size,
+            sigma=args.graph_score_plus_infer_sigma,
+            fd_eps=args.graph_refine_fd_eps,
+            projection_passes=args.graph_refine_projection_passes,
+            seed=args.graph_refine_seed,
+        )
+        refine_bundle, refine_train_stats = train_graph_vector_field(
+            refine_dataset,
+            epochs=args.graph_refine_epochs,
+            batch_size=args.graph_refine_batch_size,
+            lr=args.graph_refine_lr,
+            seed=args.graph_refine_seed,
+            device='cpu',
+        )
+        methods = graph_score_two_phase_methods(
+            step_size=args.step_size,
+            coarse_bundle=coarse_bundle,
+            refine_bundle=refine_bundle,
+            coarse_sigma=args.graph_score_plus_infer_sigma,
+            coarse_fd_eps=args.graph_score_plus_fd_eps,
+            switch_threshold=args.graph_refine_switch_threshold,
+            residual_projection_passes=args.graph_refine_projection_passes,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'coarse_dataset_samples': int(len(coarse_dataset)),
+            'refine_dataset_samples': int(len(refine_dataset)),
+            'switch_threshold': float(args.graph_refine_switch_threshold),
+            'refine_noise_scale': float(args.graph_refine_noise_scale),
+            'refine_rollout_steps': int(args.graph_refine_rollout_steps),
+            'refine_num_trajectories': int(args.graph_refine_num_trajectories),
+            'refine_projection_passes': int(args.graph_refine_projection_passes),
+            'coarse_train_stats': coarse_train_stats,
+            'refine_train_stats': refine_train_stats,
+        }
     return exploratory_methods(step_size=args.step_size), None
 
 
@@ -833,7 +895,7 @@ def maybe_plot_summary(summary: Dict[str, object], output_path: Path) -> Path | 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Constraint composition experiment harness')
-    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'vector', 'vector_unrolled', 'vector_time', 'graph_noise', 'graph_flow', 'graph_dagger', 'graph_score', 'graph_score_plus', 'graph_score_proj', 'graph_score_plus_priority', 'explore'])
+    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'vector', 'vector_unrolled', 'vector_time', 'graph_noise', 'graph_flow', 'graph_dagger', 'graph_score', 'graph_score_plus', 'graph_score_proj', 'graph_score_plus_priority', 'graph_score_two_phase', 'explore'])
     parser.add_argument('--split', type=int, default=3, choices=sorted(DEFAULT_TASKS))
     parser.add_argument('--max-scenes', type=int, default=20)
     parser.add_argument('--min-objects', type=int, default=3)
@@ -913,6 +975,16 @@ def parse_args():
     parser.add_argument('--graph-score-proj-fd-eps', type=float, default=1e-3)
     parser.add_argument('--graph-score-proj-projection-passes', type=int, default=1)
     parser.add_argument('--graph-score-proj-seed', type=int, default=0)
+    parser.add_argument('--graph-refine-num-trajectories', type=int, default=1000)
+    parser.add_argument('--graph-refine-rollout-steps', type=int, default=40)
+    parser.add_argument('--graph-refine-switch-threshold', type=float, default=1.0)
+    parser.add_argument('--graph-refine-noise-scale', type=float, default=0.05)
+    parser.add_argument('--graph-refine-epochs', type=int, default=10)
+    parser.add_argument('--graph-refine-batch-size', type=int, default=128)
+    parser.add_argument('--graph-refine-lr', type=float, default=1e-3)
+    parser.add_argument('--graph-refine-fd-eps', type=float, default=1e-3)
+    parser.add_argument('--graph-refine-projection-passes', type=int, default=1)
+    parser.add_argument('--graph-refine-seed', type=int, default=0)
     parser.add_argument('--seed', type=int, default=7)
     parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cpu', 'mps', 'cuda'])
     parser.add_argument('--output', type=str, default=None)

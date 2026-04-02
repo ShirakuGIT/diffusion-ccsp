@@ -880,3 +880,72 @@ def graph_score_plus_priority_methods(step_size: float,
             name='graph_score_plus_priority_projected',
         ),
     ]
+
+
+def make_graph_score_two_phase_method(
+    coarse_bundle: LearnedGraphVectorField,
+    refine_bundle: LearnedGraphVectorField,
+    step_size: float,
+    coarse_sigma: float,
+    coarse_fd_eps: float,
+    switch_threshold: float,
+    projection_passes: int,
+    name: str = 'graph_score_two_phase',
+) -> Method:
+    from experiments.constraint_composition.graph_score_proj_dataset import selective_project_state_linear
+
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        current_violation = total_violation(scene, poses)
+        if current_violation > switch_threshold:
+            learned_update = graph_score_plus_step(
+                scene,
+                poses,
+                coarse_bundle,
+                step_size=step_size,
+                sigma=coarse_sigma,
+                fd_eps=coarse_fd_eps,
+            )
+        else:
+            learned_update = graph_score_step(
+                scene,
+                poses,
+                refine_bundle,
+                step_size=step_size,
+            )
+
+        proposed = scene.clamp(poses + learned_update).astype(np.float32, copy=False)
+        projected = selective_project_state_linear(
+            scene,
+            proposed,
+            passes=projection_passes,
+        )
+        update = (projected - poses).astype(np.float32, copy=False)
+        update[scene.mask] = 0.0
+        return update
+
+    return Method(name=name, step_fn=step)
+
+
+def graph_score_two_phase_methods(step_size: float,
+                                  coarse_bundle: LearnedGraphVectorField,
+                                  refine_bundle: LearnedGraphVectorField,
+                                  coarse_sigma: float,
+                                  coarse_fd_eps: float = 1e-3,
+                                  switch_threshold: float = 1.0,
+                                  residual_projection_passes: int = 1,
+                                  alpha: float = 1.0,
+                                  projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_graph_score_two_phase_method(
+            coarse_bundle=coarse_bundle,
+            refine_bundle=refine_bundle,
+            step_size=step_size,
+            coarse_sigma=coarse_sigma,
+            coarse_fd_eps=coarse_fd_eps,
+            switch_threshold=switch_threshold,
+            projection_passes=residual_projection_passes,
+            name='graph_score_two_phase',
+        ),
+    ]
