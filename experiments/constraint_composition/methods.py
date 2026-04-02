@@ -442,6 +442,117 @@ def make_graph_score_plus_method(
     return Method(name=name, step_fn=step)
 
 
+def selective_project_state(
+    scene: SceneSpec,
+    poses: np.ndarray,
+    passes: int = 1,
+    min_step: float = 0.01,
+    topk: int = 0,
+) -> np.ndarray:
+    state = scene.clamp(poses).astype(np.float32, copy=False)
+    current_violation = total_violation(scene, state)
+    adaptive_passes = max(passes, 0)
+    if current_violation < 0.5:
+        adaptive_passes = max(adaptive_passes, 3)
+    elif current_violation < 1.0:
+        adaptive_passes = max(adaptive_passes, 2)
+
+    for _ in range(adaptive_passes):
+        records = violated_constraint_records(scene, state)
+        if not records:
+            break
+        records = sorted(records, key=lambda r: r.violation, reverse=True)
+        if topk > 0:
+            records = records[:topk]
+
+        updated = False
+        for record in records:
+            if record.violation <= 0.0:
+                continue
+            grad = record.grad.astype(np.float32, copy=False)
+            grad[scene.mask] = 0.0
+            grad_norm_sq = float(np.sum(grad * grad))
+            if grad_norm_sq < 1e-8:
+                continue
+
+            grad_norm = float(np.sqrt(grad_norm_sq + 1e-8))
+            direction = grad / (grad_norm + 1e-8)
+            step_mag = float(record.violation) / (1.0 + float(record.violation))
+            step_mag = max(step_mag, float(min_step))
+            correction = step_mag * direction
+            candidate = scene.clamp(state + correction).astype(np.float32, copy=False)
+            if total_violation(scene, candidate) <= total_violation(scene, state) + 1e-8:
+                state = candidate
+                updated = True
+
+        if not updated:
+            break
+
+    return state
+
+
+def make_graph_score_plus_projected_method(
+    bundle: LearnedGraphVectorField,
+    step_size: float,
+    sigma: float,
+    fd_eps: float,
+    projection_passes: int,
+    projection_min_step: float,
+    projection_topk: int,
+    name: str = 'graph_score_plus_projected',
+) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        learned_update = graph_score_plus_step(
+            scene,
+            poses,
+            bundle,
+            step_size=step_size,
+            sigma=sigma,
+            fd_eps=fd_eps,
+        )
+        proposed = scene.clamp(poses + learned_update).astype(np.float32, copy=False)
+        projected = selective_project_state(
+            scene,
+            proposed,
+            passes=projection_passes,
+            min_step=projection_min_step,
+            topk=projection_topk,
+        )
+        update = (projected - poses).astype(np.float32, copy=False)
+        update[scene.mask] = 0.0
+        return update
+
+    return Method(name=name, step_fn=step)
+
+
+def make_graph_score_proj_method(
+    bundle: LearnedGraphVectorField,
+    step_size: float,
+    sigma: float,
+    fd_eps: float,
+    projection_passes: int,
+    name: str = 'graph_score_proj',
+) -> Method:
+    from experiments.constraint_composition.graph_score_proj_dataset import selective_project_state_linear
+
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        learned_update = graph_score_plus_step(
+            scene,
+            poses,
+            bundle,
+            step_size=step_size,
+            sigma=sigma,
+            fd_eps=fd_eps,
+        )
+        proposed = scene.clamp(poses + learned_update).astype(np.float32, copy=False)
+        projected = selective_project_state_linear(scene, proposed, passes=projection_passes)
+        update = (projected - poses).astype(np.float32, copy=False)
+        update[scene.mask] = 0.0
+        return update
+
+    return Method(name=name, step_fn=step)
+
+
 def make_sequential_projection(step_size: float, ordering: str = 'descending', passes: int = 2) -> Method:
     def step(scene: SceneSpec, poses: np.ndarray, rng: np.random.Generator | None = None, **_: object) -> np.ndarray:
         state = poses.copy()
@@ -619,6 +730,9 @@ def graph_score_plus_methods(step_size: float,
                              bundle: LearnedGraphVectorField,
                              sigma: float,
                              fd_eps: float = 1e-3,
+                             residual_projection_passes: int = 1,
+                             residual_projection_min_step: float = 0.05,
+                             residual_projection_topk: int = 3,
                              alpha: float = 1.0,
                              projection_passes: int = 3) -> List[Method]:
     return [
@@ -630,5 +744,36 @@ def graph_score_plus_methods(step_size: float,
             sigma=sigma,
             fd_eps=fd_eps,
             name='graph_score_plus',
+        ),
+        make_graph_score_plus_projected_method(
+            bundle=bundle,
+            step_size=step_size,
+            sigma=sigma,
+            fd_eps=fd_eps,
+            projection_passes=residual_projection_passes,
+            projection_min_step=residual_projection_min_step,
+            projection_topk=residual_projection_topk,
+            name='graph_score_plus_projected',
+        ),
+    ]
+
+
+def graph_score_proj_methods(step_size: float,
+                             bundle: LearnedGraphVectorField,
+                             sigma: float,
+                             fd_eps: float = 1e-3,
+                             residual_projection_passes: int = 1,
+                             alpha: float = 1.0,
+                             projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_graph_score_proj_method(
+            bundle=bundle,
+            step_size=step_size,
+            sigma=sigma,
+            fd_eps=fd_eps,
+            projection_passes=residual_projection_passes,
+            name='graph_score_proj',
         ),
     ]

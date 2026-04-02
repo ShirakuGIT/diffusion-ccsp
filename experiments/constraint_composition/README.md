@@ -120,3 +120,12 @@ python -m experiments.constraint_composition.runner \
   --max-scenes 20 \
   --steps 40
 ```
+
+Projection-aware graph score field:
+
+```bash
+python -m experiments.constraint_composition.runner \
+  --suite graph_score_proj \
+  --max-scenes 20 \
+  --steps 40
+```
