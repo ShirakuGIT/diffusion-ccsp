@@ -889,6 +889,7 @@ def make_graph_score_two_phase_method(
     coarse_sigma: float,
     coarse_fd_eps: float,
     switch_threshold: float,
+    switch_temperature: float,
     projection_passes: int,
     name: str = 'graph_score_two_phase',
 ) -> Method:
@@ -896,22 +897,24 @@ def make_graph_score_two_phase_method(
 
     def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
         current_violation = total_violation(scene, poses)
-        if current_violation > switch_threshold:
-            learned_update = graph_score_plus_step(
-                scene,
-                poses,
-                coarse_bundle,
-                step_size=step_size,
-                sigma=coarse_sigma,
-                fd_eps=coarse_fd_eps,
-            )
-        else:
-            learned_update = graph_score_step(
-                scene,
-                poses,
-                refine_bundle,
-                step_size=step_size,
-            )
+        temperature = max(float(switch_temperature), 1e-6)
+        weight = 1.0 / (1.0 + np.exp((float(current_violation) - float(switch_threshold)) / temperature))
+
+        coarse_update = graph_score_plus_step(
+            scene,
+            poses,
+            coarse_bundle,
+            step_size=step_size,
+            sigma=coarse_sigma,
+            fd_eps=coarse_fd_eps,
+        )
+        refine_update = graph_score_step(
+            scene,
+            poses,
+            refine_bundle,
+            step_size=step_size,
+        )
+        learned_update = (1.0 - weight) * coarse_update + weight * refine_update
 
         proposed = scene.clamp(poses + learned_update).astype(np.float32, copy=False)
         projected = selective_project_state_linear(
@@ -932,6 +935,7 @@ def graph_score_two_phase_methods(step_size: float,
                                   coarse_sigma: float,
                                   coarse_fd_eps: float = 1e-3,
                                   switch_threshold: float = 1.0,
+                                  switch_temperature: float = 0.3,
                                   residual_projection_passes: int = 1,
                                   alpha: float = 1.0,
                                   projection_passes: int = 3) -> List[Method]:
@@ -945,6 +949,7 @@ def graph_score_two_phase_methods(step_size: float,
             coarse_sigma=coarse_sigma,
             coarse_fd_eps=coarse_fd_eps,
             switch_threshold=switch_threshold,
+            switch_temperature=switch_temperature,
             projection_passes=residual_projection_passes,
             name='graph_score_two_phase',
         ),

@@ -588,6 +588,7 @@ def select_methods(args, scenes):
             coarse_sigma=args.graph_score_plus_infer_sigma,
             coarse_fd_eps=args.graph_score_plus_fd_eps,
             switch_threshold=args.graph_refine_switch_threshold,
+            switch_temperature=args.graph_refine_switch_temperature,
             residual_projection_passes=args.graph_refine_projection_passes,
             alpha=args.projection_alpha,
             projection_passes=args.projection_passes,
@@ -599,6 +600,7 @@ def select_methods(args, scenes):
             'refine_noise_scale': float(args.graph_refine_noise_scale),
             'refine_rollout_steps': int(args.graph_refine_rollout_steps),
             'refine_num_trajectories': int(args.graph_refine_num_trajectories),
+            'switch_temperature': float(args.graph_refine_switch_temperature),
             'refine_projection_passes': int(args.graph_refine_projection_passes),
             'coarse_train_stats': coarse_train_stats,
             'refine_train_stats': refine_train_stats,
@@ -978,6 +980,7 @@ def parse_args():
     parser.add_argument('--graph-refine-num-trajectories', type=int, default=1000)
     parser.add_argument('--graph-refine-rollout-steps', type=int, default=40)
     parser.add_argument('--graph-refine-switch-threshold', type=float, default=1.0)
+    parser.add_argument('--graph-refine-switch-temperature', type=float, default=0.3)
     parser.add_argument('--graph-refine-noise-scale', type=float, default=0.05)
     parser.add_argument('--graph-refine-epochs', type=int, default=10)
     parser.add_argument('--graph-refine-batch-size', type=int, default=128)
