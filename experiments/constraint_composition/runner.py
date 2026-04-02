@@ -21,6 +21,7 @@ from experiments.constraint_composition.methods import (
     graph_noise_methods,
     graph_score_proj_methods,
     graph_score_methods,
+    graph_score_plus_priority_methods,
     graph_score_plus_methods,
     learned_energy_methods,
     langevin_methods,
@@ -497,6 +498,49 @@ def select_methods(args, scenes):
             'seed': int(args.graph_score_proj_seed),
             'train_stats': train_stats,
         }
+    if args.suite == 'graph_score_plus_priority':
+        dataset = build_graph_score_plus_dataset(
+            scenes,
+            num_samples=args.graph_score_plus_samples,
+            sigma_min=args.graph_score_plus_sigma_min,
+            sigma_max=args.graph_score_plus_sigma_max,
+            fd_eps=args.graph_score_plus_fd_eps,
+            seed=args.graph_score_plus_seed,
+        )
+        bundle, train_stats = train_graph_vector_field(
+            dataset,
+            epochs=args.graph_score_plus_epochs,
+            batch_size=args.graph_score_plus_batch_size,
+            lr=args.graph_score_plus_lr,
+            seed=args.graph_score_plus_seed,
+            device='cpu',
+        )
+        methods = graph_score_plus_priority_methods(
+            step_size=args.step_size,
+            bundle=bundle,
+            sigma=args.graph_score_plus_infer_sigma,
+            fd_eps=args.graph_score_plus_fd_eps,
+            residual_projection_passes=args.graph_score_plus_projection_passes,
+            residual_projection_topk=args.graph_score_plus_projection_topk,
+            residual_projection_threshold=args.graph_score_plus_priority_threshold,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+        )
+        return methods, {
+            'dataset_samples': int(len(dataset)),
+            'sigma_min': float(args.graph_score_plus_sigma_min),
+            'sigma_max': float(args.graph_score_plus_sigma_max),
+            'infer_sigma': float(args.graph_score_plus_infer_sigma),
+            'epochs': int(args.graph_score_plus_epochs),
+            'batch_size': int(args.graph_score_plus_batch_size),
+            'lr': float(args.graph_score_plus_lr),
+            'fd_eps': float(args.graph_score_plus_fd_eps),
+            'projection_passes': int(args.graph_score_plus_projection_passes),
+            'projection_topk': int(args.graph_score_plus_projection_topk),
+            'projection_threshold': float(args.graph_score_plus_priority_threshold),
+            'seed': int(args.graph_score_plus_seed),
+            'train_stats': train_stats,
+        }
     return exploratory_methods(step_size=args.step_size), None
 
 
@@ -789,7 +833,7 @@ def maybe_plot_summary(summary: Dict[str, object], output_path: Path) -> Path | 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Constraint composition experiment harness')
-    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'vector', 'vector_unrolled', 'vector_time', 'graph_noise', 'graph_flow', 'graph_dagger', 'graph_score', 'graph_score_plus', 'graph_score_proj', 'explore'])
+    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'vector', 'vector_unrolled', 'vector_time', 'graph_noise', 'graph_flow', 'graph_dagger', 'graph_score', 'graph_score_plus', 'graph_score_proj', 'graph_score_plus_priority', 'explore'])
     parser.add_argument('--split', type=int, default=3, choices=sorted(DEFAULT_TASKS))
     parser.add_argument('--max-scenes', type=int, default=20)
     parser.add_argument('--min-objects', type=int, default=3)
@@ -857,6 +901,7 @@ def parse_args():
     parser.add_argument('--graph-score-plus-projection-passes', type=int, default=1)
     parser.add_argument('--graph-score-plus-projection-min-step', type=float, default=0.05)
     parser.add_argument('--graph-score-plus-projection-topk', type=int, default=3)
+    parser.add_argument('--graph-score-plus-priority-threshold', type=float, default=0.01)
     parser.add_argument('--graph-score-plus-seed', type=int, default=0)
     parser.add_argument('--graph-score-proj-samples', type=int, default=30000)
     parser.add_argument('--graph-score-proj-sigma-min', type=float, default=0.01)

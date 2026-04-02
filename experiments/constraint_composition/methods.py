@@ -553,6 +553,84 @@ def make_graph_score_proj_method(
     return Method(name=name, step_fn=step)
 
 
+def selective_project_state_priority(
+    scene: SceneSpec,
+    poses: np.ndarray,
+    passes: int = 1,
+    topk: int = 3,
+    threshold: float = 0.01,
+) -> np.ndarray:
+    state = scene.clamp(poses).astype(np.float32, copy=False)
+
+    for _ in range(max(passes, 0)):
+        records = violated_constraint_records(scene, state)
+        if not records:
+            break
+
+        records = sorted(
+            records,
+            key=lambda r: (float(r.violation), float(np.linalg.norm(r.grad))),
+            reverse=True,
+        )
+        if topk > 0:
+            records = records[:topk]
+
+        updated = False
+        for record in records:
+            if record.violation < threshold:
+                break
+            grad = record.grad.astype(np.float32, copy=False)
+            grad[scene.mask] = 0.0
+            grad_norm_sq = float(np.sum(grad * grad))
+            if grad_norm_sq < 1e-8:
+                continue
+
+            correction = (float(record.violation) / (grad_norm_sq + 1e-8)) * grad
+            candidate = scene.clamp(state + correction).astype(np.float32, copy=False)
+            if total_violation(scene, candidate) <= total_violation(scene, state) + 1e-8:
+                state = candidate
+                updated = True
+
+        if not updated:
+            break
+
+    return state
+
+
+def make_graph_score_plus_priority_projected_method(
+    bundle: LearnedGraphVectorField,
+    step_size: float,
+    sigma: float,
+    fd_eps: float,
+    projection_passes: int,
+    projection_topk: int,
+    projection_threshold: float,
+    name: str = 'graph_score_plus_priority_projected',
+) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        learned_update = graph_score_plus_step(
+            scene,
+            poses,
+            bundle,
+            step_size=step_size,
+            sigma=sigma,
+            fd_eps=fd_eps,
+        )
+        proposed = scene.clamp(poses + learned_update).astype(np.float32, copy=False)
+        projected = selective_project_state_priority(
+            scene,
+            proposed,
+            passes=projection_passes,
+            topk=projection_topk,
+            threshold=projection_threshold,
+        )
+        update = (projected - poses).astype(np.float32, copy=False)
+        update[scene.mask] = 0.0
+        return update
+
+    return Method(name=name, step_fn=step)
+
+
 def make_sequential_projection(step_size: float, ordering: str = 'descending', passes: int = 2) -> Method:
     def step(scene: SceneSpec, poses: np.ndarray, rng: np.random.Generator | None = None, **_: object) -> np.ndarray:
         state = poses.copy()
@@ -775,5 +853,30 @@ def graph_score_proj_methods(step_size: float,
             fd_eps=fd_eps,
             projection_passes=residual_projection_passes,
             name='graph_score_proj',
+        ),
+    ]
+
+
+def graph_score_plus_priority_methods(step_size: float,
+                                      bundle: LearnedGraphVectorField,
+                                      sigma: float,
+                                      fd_eps: float = 1e-3,
+                                      residual_projection_passes: int = 1,
+                                      residual_projection_topk: int = 3,
+                                      residual_projection_threshold: float = 0.01,
+                                      alpha: float = 1.0,
+                                      projection_passes: int = 3) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_graph_score_plus_priority_projected_method(
+            bundle=bundle,
+            step_size=step_size,
+            sigma=sigma,
+            fd_eps=fd_eps,
+            projection_passes=residual_projection_passes,
+            projection_topk=residual_projection_topk,
+            projection_threshold=residual_projection_threshold,
+            name='graph_score_plus_priority_projected',
         ),
     ]
