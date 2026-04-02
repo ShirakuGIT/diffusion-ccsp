@@ -30,6 +30,11 @@ def evaluate_trajectory(scene: SceneSpec, trajectory: List[np.ndarray], feasibil
         cosines.append(cosine_similarity(dx, -grad_v))
 
     final_violation = float(violations[-1])
+    late_start = len(delta_vs) // 2 if len(delta_vs) >= 2 else 0  # steps 15+ for 40-step rollout (floor(39/2)=19, but spec says 15)
+    late_start = min(15, len(delta_vs))
+    late_delta_vs = delta_vs[late_start:]
+    late_cosines = cosines[late_start:]
+    late_step_sizes = step_sizes[late_start:]
     result = {
         'trajectory_violation': [float(v) for v in violations],
         'trajectory_violated_constraints': [int(v) for v in violated_counts],
@@ -43,6 +48,10 @@ def evaluate_trajectory(scene: SceneSpec, trajectory: List[np.ndarray], feasibil
         'mean_step_cosine': float(np.mean(cosines)) if cosines else 1.0,
         'mean_step_size': float(np.mean(step_sizes)) if step_sizes else 0.0,
         'max_step_size': float(np.max(step_sizes)) if step_sizes else 0.0,
+        'late_delta_violation': float(np.mean(late_delta_vs)) if late_delta_vs else 0.0,
+        'late_step_cosine': float(np.mean(late_cosines)) if late_cosines else 1.0,
+        'late_step_norm': float(np.mean(late_step_sizes)) if late_step_sizes else 0.0,
+        'late_plateau_fraction': float(np.mean([abs(dv) < plateau_threshold for dv in late_delta_vs])) if late_delta_vs else 0.0,
         'final_violation': final_violation,
         'final_num_violated_constraints': int(violated_counts[-1]) if violated_counts else 0,
         'feasible': bool(final_violation < feasibility_eps),
@@ -58,7 +67,9 @@ def aggregate_method_runs(runs: List[Dict[str, object]]) -> Dict[str, object]:
     summary: Dict[str, object] = {'num_runs': len(runs)}
     for key in ['monotonic_fraction', 'num_plateau_steps', 'plateau_fraction',
                 'mean_delta_violation', 'mean_step_cosine',
-                'mean_step_size', 'max_step_size', 'final_violation', 'final_num_violated_constraints']:
+                'mean_step_size', 'max_step_size',
+                'late_delta_violation', 'late_step_cosine', 'late_step_norm', 'late_plateau_fraction',
+                'final_violation', 'final_num_violated_constraints']:
         values = [float(run[key]) for run in runs]
         summary[f'{key}_mean'] = float(np.mean(values))
         summary[f'{key}_std'] = float(np.std(values))

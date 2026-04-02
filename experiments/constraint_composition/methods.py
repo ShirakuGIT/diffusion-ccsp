@@ -891,6 +891,7 @@ def make_graph_score_two_phase_method(
     switch_threshold: float,
     switch_temperature: float,
     projection_passes: int,
+    refine_gain: float = 1.0,
     name: str = 'graph_score_two_phase',
 ) -> Method:
     from experiments.constraint_composition.graph_score_proj_dataset import selective_project_state_linear
@@ -914,7 +915,7 @@ def make_graph_score_two_phase_method(
             refine_bundle,
             step_size=step_size,
         )
-        learned_update = (1.0 - weight) * coarse_update + weight * refine_update
+        learned_update = (1.0 - weight) * coarse_update + weight * (float(refine_gain) * refine_update)
 
         proposed = scene.clamp(poses + learned_update).astype(np.float32, copy=False)
         projected = selective_project_state_linear(
@@ -939,9 +940,8 @@ def graph_score_two_phase_methods(step_size: float,
                                   residual_projection_passes: int = 1,
                                   alpha: float = 1.0,
                                   projection_passes: int = 3) -> List[Method]:
-    return [
-        make_energy_descent(step_size=step_size, normalized=False),
-        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+    gain_sweep = [1.0, 2.0, 3.0, 5.0]
+    gain_methods = [
         make_graph_score_two_phase_method(
             coarse_bundle=coarse_bundle,
             refine_bundle=refine_bundle,
@@ -951,6 +951,13 @@ def graph_score_two_phase_methods(step_size: float,
             switch_threshold=switch_threshold,
             switch_temperature=switch_temperature,
             projection_passes=residual_projection_passes,
-            name='graph_score_two_phase',
-        ),
+            refine_gain=g,
+            name=f'graph_score_two_phase_gain{int(g)}',
+        )
+        for g in gain_sweep
+    ]
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        *gain_methods,
     ]

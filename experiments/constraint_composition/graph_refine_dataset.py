@@ -25,6 +25,7 @@ def build_graph_refine_dataset(
     fd_eps: float = 1e-3,
     projection_passes: int = 1,
     seed: int = 0,
+    target_mode: str = 'gradient',
 ) -> list[Data]:
     scenes = list(scenes)
     if not scenes:
@@ -47,12 +48,20 @@ def build_graph_refine_dataset(
                     sample_poses[:, :2] += noise
                     sample_poses = scene.clamp(sample_poses).astype(np.float32, copy=False)
 
-                grad = numerical_grad(
-                    sample_poses,
-                    lambda x: total_violation(scene, scene.clamp(x)),
-                    eps=fd_eps,
-                )
-                target = (-grad[:, :2]).astype(np.float32, copy=False)
+                if target_mode == 'projection':
+                    projected = selective_project_state_linear(
+                        scene,
+                        sample_poses,
+                        passes=projection_passes,
+                    )
+                    target = (projected[:, :2] - sample_poses[:, :2]).astype(np.float32, copy=False)
+                else:
+                    grad = numerical_grad(
+                        sample_poses,
+                        lambda x: total_violation(scene, scene.clamp(x)),
+                        eps=fd_eps,
+                    )
+                    target = (-grad[:, :2]).astype(np.float32, copy=False)
                 target[scene.mask] = 0.0
 
                 mask_col = scene.mask.astype(np.float32).reshape(-1, 1)
