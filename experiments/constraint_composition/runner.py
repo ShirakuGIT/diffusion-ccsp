@@ -30,6 +30,7 @@ from experiments.constraint_composition.methods import (
     make_graph_score_two_phase_method,
     make_projected_energy,
     projection_methods,
+    rectified_flow_methods,
     prototype_methods,
     vector_field_methods,
     vector_time_methods,
@@ -677,6 +678,14 @@ def select_methods(args, scenes):
             'coarse_train_stats': coarse_train_stats,
             'refine_train_stats': refine_train_stats,
         }
+    if args.suite == 'rectified_flow':
+        return rectified_flow_methods(
+            step_size=args.step_size,
+            alpha=args.projection_alpha,
+            projection_passes=args.projection_passes,
+            noise_scale=args.rf_noise_scale,
+            max_step=args.rf_max_step,
+        ), None
     return exploratory_methods(step_size=args.step_size), None
 
 
@@ -969,7 +978,7 @@ def maybe_plot_summary(summary: Dict[str, object], output_path: Path) -> Path | 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Constraint composition experiment harness')
-    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'vector', 'vector_unrolled', 'vector_time', 'graph_noise', 'graph_flow', 'graph_dagger', 'graph_score', 'graph_score_plus', 'graph_score_proj', 'graph_score_plus_priority', 'graph_score_two_phase', 'graph_score_two_phase_proj_target', 'explore'])
+    parser.add_argument('--suite', type=str, default='projection', choices=['langevin', 'projection', 'prototype', 'learned', 'global', 'vector', 'vector_unrolled', 'vector_time', 'graph_noise', 'graph_flow', 'graph_dagger', 'graph_score', 'graph_score_plus', 'graph_score_proj', 'graph_score_plus_priority', 'graph_score_two_phase', 'graph_score_two_phase_proj_target', 'rectified_flow', 'explore'])
     parser.add_argument('--split', type=int, default=3, choices=sorted(DEFAULT_TASKS))
     parser.add_argument('--max-scenes', type=int, default=20)
     parser.add_argument('--min-objects', type=int, default=3)
@@ -1061,6 +1070,8 @@ def parse_args():
     parser.add_argument('--graph-refine-projection-passes', type=int, default=1)
     parser.add_argument('--graph-refine-seed', type=int, default=0)
     parser.add_argument('--graph-refine-gain', type=float, default=1.0)
+    parser.add_argument('--rf-noise-scale', type=float, default=0.05)
+    parser.add_argument('--rf-max-step', type=float, default=0.1)
     parser.add_argument('--seed', type=int, default=7)
     parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cpu', 'mps', 'cuda'])
     parser.add_argument('--output', type=str, default=None)

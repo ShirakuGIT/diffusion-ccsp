@@ -8,6 +8,7 @@ import torch
 
 from experiments.constraint_composition.core import (
     SceneSpec,
+    evaluate_constraints,
     total_violation,
     total_violation_gradient,
     violated_constraint_records,
@@ -960,4 +961,131 @@ def graph_score_two_phase_methods(step_size: float,
         make_energy_descent(step_size=step_size, normalized=False),
         make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
         *gain_methods,
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Analytical Rectified Flow diagnostic methods
+# ---------------------------------------------------------------------------
+
+def compose_per_constraint_velocity(
+    scene: SceneSpec,
+    poses: np.ndarray,
+    max_step: float = 0.1,
+) -> tuple[np.ndarray, list[float]]:
+    """Compose RF velocities from per-constraint individual projections.
+
+    Each violated constraint is projected independently (all seeing the same
+    input state), then velocities are summed.  Returns the composed velocity
+    and a list of per-constraint velocity norms for scale-dominance analysis.
+    """
+    records = evaluate_constraints(scene, poses)
+    v = np.zeros_like(poses, dtype=np.float32)
+    vel_norms: list[float] = []
+    for record in records:
+        if record.violation <= 0.0:
+            continue
+        grad = record.grad.copy().astype(np.float32)
+        grad[scene.mask] = 0.0
+        grad_norm_sq = float(np.sum(grad * grad))
+        if grad_norm_sq < 1e-8:
+            continue
+        correction = (float(record.violation) / (grad_norm_sq + 1e-8)) * grad
+        corr_norm = float(np.linalg.norm(correction))
+        if corr_norm > max_step:
+            correction = (max_step / corr_norm) * correction
+        x1_c = scene.clamp(poses + correction).astype(np.float32)
+        v_c = x1_c - poses
+        v += v_c
+        vel_norms.append(float(np.linalg.norm(v_c)))
+    v[scene.mask] = 0.0
+    return v, vel_norms
+
+
+def make_rf_composed_reproject(
+    max_step: float = 0.1,
+    max_vel_norm: float = 5.0,
+) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray,
+             t: int = 0, T: int = 1, **_: object) -> np.ndarray:
+        v, _ = compose_per_constraint_velocity(scene, poses, max_step=max_step)
+        dt = 1.0 / max(T, 1)
+        t_norm = t / max(T, 1)
+        scale = dt / max(1.0 - t_norm, dt)
+        dx = v * float(scale)
+        dx_norm = float(np.linalg.norm(dx))
+        if dx_norm > max_vel_norm:
+            dx = dx * (max_vel_norm / dx_norm)
+        dx[scene.mask] = 0.0
+        return dx
+
+    return Method(name='rf_composed_reproject', step_fn=step)
+
+
+def make_rf_composed_fixed(max_step: float = 0.1) -> Method:
+    cache: Dict[str, np.ndarray | None] = {'x0': None, 'x1': None}
+
+    def step(scene: SceneSpec, poses: np.ndarray,
+             t: int = 0, T: int = 1, **_: object) -> np.ndarray:
+        if t == 0:
+            v, _ = compose_per_constraint_velocity(scene, poses, max_step=max_step)
+            v = np.clip(v, -1.0, 1.0)
+            cache['x0'] = poses.copy()
+            cache['x1'] = scene.clamp(poses + v).astype(np.float32)
+        x0 = cache['x0']
+        x1 = cache['x1']
+        t_next = (t + 1) / max(T, 1)
+        target_next = (1.0 - t_next) * x0 + t_next * x1
+        dx = (target_next - poses).astype(np.float32)
+        dx[scene.mask] = 0.0
+        return dx
+
+    return Method(name='rf_composed_fixed', step_fn=step)
+
+
+def make_rf_composed_raw(max_step: float = 0.1) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray, **_: object) -> np.ndarray:
+        v, _ = compose_per_constraint_velocity(scene, poses, max_step=max_step)
+        return v
+
+    return Method(name='rf_composed_raw', step_fn=step)
+
+
+def make_rf_composed_langevin(
+    max_step: float = 0.1,
+    noise_scale: float = 0.05,
+) -> Method:
+    def step(scene: SceneSpec, poses: np.ndarray,
+             t: int = 0, T: int = 1,
+             rng: np.random.Generator | None = None,
+             **_: object) -> np.ndarray:
+        v, _ = compose_per_constraint_velocity(scene, poses, max_step=max_step)
+        dt = 1.0 / max(T, 1)
+        t_norm = t / max(T, 1)
+        scale = dt / max(1.0 - t_norm, dt)
+        sigma = noise_scale * (1.0 - t_norm)
+        if rng is None:
+            rng = np.random.default_rng()
+        noise = rng.standard_normal(size=poses.shape).astype(np.float32)
+        dx = v * float(scale) + float(sigma * np.sqrt(dt)) * noise
+        dx[scene.mask] = 0.0
+        return dx
+
+    return Method(name='rf_composed_langevin', step_fn=step)
+
+
+def rectified_flow_methods(
+    step_size: float = 0.1,
+    alpha: float = 1.0,
+    projection_passes: int = 3,
+    noise_scale: float = 0.05,
+    max_step: float = 0.1,
+) -> List[Method]:
+    return [
+        make_energy_descent(step_size=step_size, normalized=False),
+        make_projected_energy(step_size=step_size, alpha=alpha, projection_passes=projection_passes),
+        make_rf_composed_reproject(max_step=max_step),
+        make_rf_composed_fixed(max_step=max_step),
+        make_rf_composed_raw(max_step=max_step),
+        make_rf_composed_langevin(max_step=max_step, noise_scale=noise_scale),
     ]
