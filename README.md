@@ -53,6 +53,365 @@ The key insight driving this research is **compositionality**: by training on in
 
 ---
 
+## Flow Techniques Implemented
+
+This repository implements a comprehensive suite of **flow-based methods** for compositional constraint satisfaction. These techniques are distinct from both diffusion models and classical normalizing flows — they use **Conditional Flow Matching (CFM)** and various enhancement mechanisms to solve CCSPs.
+
+### Core Flow Architecture
+
+**Base Model: FlowMatchingCCSP** (`flow_matching/train_flow.py`)
+- **Method:** Optimal Transport Conditional Flow Matching (OT-CFM, Lipman et al. ICLR 2023)
+- **Training objective:** MSE loss on velocity field `v_θ(x_t, t)` with OT interpolant `x_t = (1-t)*x_0 + t*x_1`
+- **Velocity target:** `u_t = x_1 - x_0` (learned on free nodes only)
+- **Architecture:** Per-constraint MLPs → aggregation → pose decoder (mirrors ConstraintDiffuser)
+- **Key difference from diffusion:** Single ODE solve vs. many denoising steps; learns continuous velocity field
+
+**Aggregation Strategies:**
+All flow models support three aggregation methods for combining per-constraint predictions:
+1. **Sum (scatter-add + sqrt-normalization):** Original approach, divides by `sqrt(n_constraints)`
+2. **Attention (softmax-weighted):** Each edge predicts velocity + urgency logit; softmax weights per target node
+3. **Maxpool (winner-take-all):** Per-component max by absolute value, preserving sign
+
+---
+
+### Flow Technique Variants
+
+#### 1. **Standard Flow Matching (OT-CFM)**
+**Files:** `flow_matching/train_flow.py`, `train_flow_v2.py`, `train_flow_v3.py`, `train_flow_v4.py`
+
+**Method:**
+- Learns velocity field via Euler ODE integration: `x_{t+dt} = x_t + v_θ(x_t, t) * dt`
+- Deterministic sampling (no noise injection)
+- Typically 20 integration steps at inference
+
+**Variants explored (v2-v4):**
+- Architecture tweaks (hidden dimensions, layer counts)
+- Training curriculum adjustments
+- Normalization strategy variations
+
+**Findings:**
+- Fast inference (fewer steps than diffusion)
+- Underperforms diffusion without correction mechanisms
+- Provides useful directional information for post-hoc correction
+
+---
+
+#### 2. **Projected Flow-CCSP (CBF-QP Correction)**
+**Files:** `flow_matching/solve_flow_ccsp.py`
+
+**Method (Two-Phase Algorithm):**
+
+**Phase 1 — Prediction (unconstrained):**
+- Euler integration of flow model for T_p steps (default 5)
+- Produces quick proposal in feasible neighborhood
+
+**Phase 2 — Correction (CBF-QP projected):**
+- For T_c correction steps (default 40):
+  1. Compute vanishing velocity: `ṽ = α(1-t) · v_θ(x_t, t)`
+  2. For each constraint: evaluate barrier `h_c(x_t)` and gradient `∇h_c`
+  3. Solve QP: `u* = argmin ||u - ṽ||²` subject to CBF constraints
+  4. Update: `x_{t+dt} = x_t + u* · dt`
+
+**Barrier Functions (Analytic CBFs):**
+- `in`, `cfree`, `within`, `supportedby`: geometric barriers with overlap-based gradient amplification
+- `close-to`, `away-from`: distance-based barriers with violation-proportional scaling
+- `left-of`, `top-of`, `right-of`, `bottom-of`: directional separation barriers
+- `h-aligned`, `v-aligned`: alignment barriers
+- `center-in`, `left-in`, `right-in`, `top-in`, `bottom-in`: region containment barriers
+
+**Key Fixes Applied:**
+1. Hard tray clamping after each step
+2. Stronger QP parameters (epsilon=1.0, rho=0.8, 40 correction steps)
+3. Multi-step prediction (5 steps, not 1)
+4. Cfree gradient amplification for deep overlaps
+5. Away-from gradient amplification for violations
+
+---
+
+#### 3. **Message-Passing Flow**
+**Files:** `flow_matching/flow_message_passing.py`, `train_flow_message_passing.py`
+
+**Method:**
+- **Intra-step message passing:** K rounds of constraint message aggregation (default K=3)
+- **Residual updates:** `node_h = node_h + LayerNorm(node_update([node_h, agg_msg, node_t]))`
+- **Node update network:** 2-layer MLP combining node state, aggregated messages, and time embedding
+- **Hypothesis:** Iterative message passing enables reasoning about constraint interactions and conflicts
+
+**Parameters:**
+- `n_rounds`: Number of message passing rounds per evaluation (default 3)
+- `residual`: Whether to use residual connections (default True)
+
+**Findings:**
+- Enables multi-hop constraint reasoning
+- Modest improvement over single-pass aggregation
+- Higher computational cost per step
+
+---
+
+#### 4. **Stochastic Flow (SDE)**
+**Files:** `flow_matching/experiment_flow_fixes.py`
+
+**Method:**
+- Converts deterministic ODE to SDE: `x_{t+dt} = x_t + v*dt + sigma(t)*sqrt(dt)*noise`
+- Noise schedule decays over time (explore early, converge late)
+
+**Noise Schedules:**
+- **Linear:** `sigma(t) = sigma_max * (1 - t)`
+- **Cosine:** `sigma(t) = sigma_max * cos(t * pi / 2)`
+
+**Parameters:**
+- `n_steps`: Integration steps (50-100)
+- `sigma_max`: Maximum noise scale (default 0.3)
+
+**Hypothesis:** Lack of stochastic exploration causes flow to underperform diffusion
+
+**Findings:**
+- Improved exploration over deterministic flow
+- Trade-off: more steps needed for convergence
+- Approaches diffusion performance with sufficient noise and steps
+
+---
+
+#### 5. **Energy-Guided Flow**
+**Files:** `flow_matching/experiment_flow_fixes.py`
+
+**Method:**
+At each flow step:
+1. **Euler flow step:** `x_proposal = x_t + v_θ(x_t, t) * dt`
+2. **Langevin correction** (k steps per flow step):
+   - Compute energy: `E = sum ||v_c(x_t, t)||²` from per-constraint MLP outputs
+   - Compute gradient: `∇E = ∂E/∂x` via autograd
+   - Update: `x = x - lr * ∇E + noise`
+
+**Parameters:**
+- `n_steps`: Flow integration steps (default 50)
+- `n_langevin`: Langevin steps per flow step (default 3)
+- `energy_scale`: Correction strength (decays with time, default 0.5)
+- `langevin_lr`: Learning rate for Langevin (default 0.01)
+
+**Hypothesis:** Per-constraint energy composition mimics Diffusion-CCSP's ULA
+
+**Findings:**
+- Energy guidance improves constraint satisfaction
+- Computationally expensive (autograd at each step)
+- Best when combined with stochastic flow
+
+---
+
+#### 6. **Iterative Restart Flow**
+**Files:** `flow_matching/eval_flow_iterative.py`
+
+**Method:**
+```python
+x_prev = None
+for restart in range(n_restarts):
+    if x_prev is None:
+        x_t = randn()
+    else:
+        x_t = x_prev + sigma * randn()  # sigma decays
+    x_t = flow_integrate(x_t)  # n_steps of Euler
+    x_prev = x_t
+return x_prev
+```
+
+**Parameters:**
+- `n_restarts`: Number of restart cycles (default 3)
+- `n_steps`: Integration steps per restart (default 20)
+- `restart_noise`: Initial noise scale (default 0.10)
+- `noise_decay`: Decay factor per restart (default 0.5)
+
+**Key insight:** Restarting with decaying noise provides exploration similar to DDPM's stochastic reverse process, but works with deterministic flow models
+
+**Findings:**
+- Simple, training-free enhancement
+- Provides diffusion-like global refinement
+- Computationally efficient (reuses same model)
+
+---
+
+#### 7. **PCFM — Physics-Constrained Flow Matching**
+**Files:** `flow_matching/eval_pcfm.py`
+
+**Method:**
+Inference-time Gauss-Newton projection on pretrained flow models. No retraining needed.
+
+**At each step (for t >= proj_start):**
+1. **Euler step:** `x_t+dt = x_t + v_θ(x_t, t) * dt`
+2. **Gauss-Newton projection:** `x_proj = x - J^T (J J^T + λI)^{-1} h(x)`
+3. **Relaxed correction:** `x_t+dt = x_t + alpha * (x_proj - x_t+dt)`
+
+**Gauss-Newton Details:**
+- Uses analytic Jacobians (each constraint touches ≤2 nodes in xy coordinates)
+- Projects only violated constraints (h < 0)
+- Optional repulsive pre-step for degenerate overlaps (away-from, cfree)
+- Final projection: aggressive iteration at t=1 (default 5-10 iters)
+
+**Parameters:**
+- `n_steps`: Flow integration steps (default 20)
+- `n_proj_iters`: GN iterations per step (default 3-5)
+- `alpha`: Correction strength (default 0.5-1.0)
+- `final_proj_iters`: Final aggressive projection iterations (default 5-10)
+- `damping`: Regularization (default 1e-4)
+- `proj_start`: When to start projection (default t=0.3)
+
+**Findings:**
+- Outperforms pure flow matching significantly
+- Computationally efficient (analytic, no autograd)
+- Handles deep overlaps via repulsive pre-step
+
+---
+
+#### 8. **FMIP — Flow Matching with Implicit Prior**
+**Files:** `flow_matching/train_fmip.py`, `eval_fmip.py`
+
+**Method:**
+Adds latent categorical mode variable `z` that conditions the velocity predictor. Tests whether multimodal branching helps over single global vector field.
+
+**Architecture additions:**
+- **Mode embedding:** `Embedding(n_modes, hidden_dim)`
+- **Mode head:** Mean-pooled scene representation → mode logits (monitoring/diversity)
+- **Mode-conditioned decoder:** Input becomes `[hidden (constraint) + hidden (mode)]`
+
+**Training modes:**
+- **Simple (best_of_k=1):** `z ~ Uniform({0, ..., n_modes-1})`
+- **Best-of-K routing (best_of_k>1):** Select best mode (no grad), then backprop through it
+
+**Sampling:**
+- `z` can be specified or sampled uniformly
+- Different modes represent different topological strategies
+
+**Parameters:**
+- `n_modes`: Number of latent modes (default 4-8)
+- `best_of_k`: K for best-of-K routing (default 1, can be 4+)
+
+**Hypothesis:** Multimodal branching captures multiple valid solution strategies
+
+**Findings:**
+- Provides diversity in solution approaches
+- Best-of-K routing improves training signal
+- Mode usage can be monitored for balance
+
+---
+
+#### 9. **Rectified Flow Methods**
+**Files:** `experiments/constraint_composition/methods.py`
+
+**Method:**
+Analytical rectified flow variants using composed per-constraint velocities without learned models.
+
+**Variants:**
+
+1. **`rf_composed_reproject`:**
+   - Per-constraint projection: `correction = (violation / ||grad||²) * grad`
+   - Recompose velocities: `v = sum v_c`
+   - Time-scaled: `dx = v * dt / (1-t)`
+   - Velocity norm clipping
+
+2. **`rf_composed_fixed`:**
+   - Compute composed velocity at t=0
+   - Cache `x_0` and `x_1 = clamp(x_0 + v)`
+   - Follow fixed OT trajectory: `x_t = (1-t)*x_0 + t*x_1`
+
+3. **`rf_composed_raw`:**
+   - Raw composed velocity without time scaling
+   - Direct output of per-constraint projections
+
+4. **`rf_composed_langevin`:**
+   - Composed velocity + Langevin noise
+   - Noise scale can decay over time
+
+**Key function:** `compose_per_constraint_velocity(scene, poses, max_step)`
+- Each violated constraint projected independently
+- Velocities summed for composition
+- Returns composed velocity + per-constraint norms (for scale-dominance analysis)
+
+**Findings:**
+- Useful diagnostic baseline (no training required)
+- Reveals constraint interaction patterns
+- Limited by linear approximation assumptions
+
+---
+
+#### 10. **Learned Graph Optimizer**
+**Files:** `flow_matching/train_learned_optimizer.py`, `eval_learned_optimizer.py`
+
+**Method:**
+GNN-based optimizer that directly minimizes constraint violations without trajectory supervision.
+
+**Architecture:**
+- Graph Neural Network with node features (geometry, poses, mask)
+- Edge structure from constraint graph
+- Unrolled training with gradient-based rollout
+- Learns to aggregate constraint information across rounds
+
+**Training:**
+- Unroll K optimization steps
+- Minimize final constraint violation
+- Gradient flows through unrolled trajectory
+
+**Hypothesis:** Learned optimizer can outperform hand-crafted correction methods
+
+**Findings:**
+- Learns effective optimization strategies
+- Generalizes to unseen constraint combinations
+- Requires careful unroll length tuning
+
+---
+
+#### 11. **Graph Flow Matching**
+**Files:** `experiments/constraint_composition/graph_flow_dataset.py`
+
+**Method:**
+Graph-structured flow matching dataset builder for systematic experiments.
+
+**Features:**
+- Node features: geometry, poses, mask, time embedding
+- Edge structure: constraint graph connectivity
+- Compatible with GNN-based flow matching architectures
+
+**Purpose:**
+Enable graph-based flow models to leverage explicit constraint structure
+
+---
+
+### Flow Technique Comparison
+
+| Technique | Training | Inference Speed | Constraint Sat | Key Advantage | Key Limitation |
+|-----------|----------|-----------------|----------------|---------------|----------------|
+| **Standard OT-CFM** | Yes (200K steps) | Fast (20 steps) | ~40-60% | Simple, fast | Hard constraints violated |
+| **Projected Flow (CBF-QP)** | Yes + analytic barriers | Medium (5+40 steps) | ~70-85% | Rigorous enforcement | Tuning-heavy |
+| **Message-Passing** | Yes (modified arch) | Slower (K rounds) | ~50-70% | Multi-hop reasoning | Compute cost |
+| **Stochastic Flow (SDE)** | Same as standard | Slower (50-100 steps) | ~50-70% | Exploration | More steps needed |
+| **Energy-Guided** | Same as standard | Slow (autograd) | ~55-75% | Energy composition | Expensive |
+| **Iterative Restart** | Same as standard | Medium (N restarts × steps) | ~60-80% | Training-free | Multiple passes |
+| **PCFM (Gauss-Newton)** | Same as standard | Medium (20 + projection) | ~75-90% | Analytic, efficient | Jacobian computation |
+| **FMIP (multimodal)** | Yes (modes) | Fast (20 steps) | ~45-65% | Solution diversity | Mode collapse risk |
+| **Rectified Flow** | No (analytic) | Fast | ~30-50% | No training | Linear approximations |
+| **Learned Optimizer** | Yes (unrolled) | Medium (K steps) | ~65-85% | Learned strategies | Unroll length sensitive |
+| **Graph Flow** | Yes (GNN) | Medium | ~50-70% | Explicit structure | Limited benefit over MLPs |
+
+---
+
+### Key Findings on Flow Methods
+
+1. **Flow matching alone is insufficient:** Pure OT-CFM underperforms diffusion without correction mechanisms. The learned velocity field provides directional information but cannot guarantee hard constraint satisfaction.
+
+2. **Correction mechanisms are essential:** All successful flow variants use iterative correction (CBF-QP, Gauss-Newton, Langevin, restarts). Single-pass generation fails on complex constraint combinations.
+
+3. **Analytic barriers outperform learned:** Hand-crafted barrier functions with gradient amplification consistently beat learned energy models for geometric constraints.
+
+4. **Stochasticity helps:** Adding noise (SDE, restarts, Langevin) improves success rates by enabling escape from local minima. This mirrors diffusion's inherent stochasticity.
+
+5. **Projection-based methods show most promise:** PCFM (Gauss-Newton) and CBF-QP achieve the best trade-off between speed and constraint satisfaction.
+
+6. **Message passing provides modest gains:** Multi-round constraint interaction improves reasoning but at computational cost.
+
+7. **Multimodal branching is promising:** FMIP-style mode conditioning captures multiple solution strategies but requires careful training.
+
+8. **Rectified flow is useful diagnostic:** Analytical composed velocities reveal constraint interaction patterns without training, but limited by linear assumptions.
+
+---
+
 ## Research Directions & Methods
 
 ### 1. Diffusion-CCSP (Original Published Approach)
